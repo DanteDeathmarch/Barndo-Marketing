@@ -9,7 +9,7 @@ interface Msg {
 }
 
 const GREETING =
-  "Hey there — I'm the BarndoBuilt concierge. Ask me anything about barndominiums: cost, financing, the build process, or whether your land's a fit. Happy to help.";
+  "Hey — I'm the BarndoBuilt concierge. Tell me about the barndo you're picturing, or about the land you'd build it on. I'll help shape it into something real.";
 
 export default function ConciergeWidget() {
   const [open, setOpen] = useState(false);
