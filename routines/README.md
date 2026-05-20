@@ -8,8 +8,9 @@ owner with findings + proposed changes.
 | Routine | Cadence | Skill it runs | What lands in the owner's inbox |
 |---|---|---|---|
 | [daily-audit.json](./daily-audit.json) | Every day, 6am owner time | [`self-audit`](../skills/self-audit/SKILL.md) | Green/yellow/red health card + action items |
-| [daily-improvement.json](./daily-improvement.json) | Every day, 7am owner time | [`lessons-learned`](../skills/lessons-learned/SKILL.md) | New lessons + proposed prompt/KB tweaks |
+| [daily-improvement.json](./daily-improvement.json) | Every day, 7am owner time | [`lessons-learned`](../skills/lessons-learned/SKILL.md) + [`mine-transcripts-to-personas`](../skills/mine-transcripts-to-personas/SKILL.md) for clusters of 3+ | New lessons + proposed prompt/KB tweaks + proposed new eval personas |
 | [weekly-research.json](./weekly-research.json) | Monday, 8am owner time | [`research-niche`](../skills/research-niche/SKILL.md) | Sourced research brief + proposed KB additions |
+| [weekly-ab-evaluator.json](./weekly-ab-evaluator.json) | Monday, 10am owner time | [`ab-test-prompt`](../skills/ab-test-prompt/SKILL.md) Phase 3 | A/B traffic comparison + PROMOTE / REVERT / CONTINUE recommendation (skipped if B === A — no active experiment) |
 | [monthly-eval.json](./monthly-eval.json) | 1st of month, 9am owner time | [`live-fire-test`](../skills/live-fire-test/SKILL.md) | Aggregate eval scores + deltas + top 3 failure modes |
 
 ## How the install wizard provisions these
@@ -48,10 +49,11 @@ Rough monthly cost on the customer's Anthropic bill, per routine:
 | Routine | Per-run cost | Monthly total |
 |---|---|---|
 | daily-audit | $0.10–0.30 | $3–9 |
-| daily-improvement | $0.20–0.60 | $6–18 |
+| daily-improvement | $0.30–0.80 (now includes persona mining) | $9–24 |
 | weekly-research | $1–3 | $4–12 |
+| weekly-ab-evaluator | $0.30–1.50 (skips if no experiment) | $0–6 |
 | monthly-eval | $2–8 | $2–8 |
-| **All four routines** | | **~$15–47/mo** |
+| **All five routines** | | **~$18–59/mo** |
 
 This is on top of the live bot's runtime cost (which depends on
 conversation volume). Both are within the customer's Anthropic billing —

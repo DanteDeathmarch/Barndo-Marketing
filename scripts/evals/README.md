@@ -22,11 +22,34 @@ deduped suggested edits, and the full transcript of every conversation.
 echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env.local
 
 # 2. Run
-npm run evals
+npm run evals                       # variant A (production) only
+npm run evals -- --variant=B        # variant B (experimental candidate)
+npm run evals -- --variant=both     # both, side-by-side A vs B with winner recommendation
 ```
 
-Cost per full run with 15 personas: roughly **$1–3** in API spend, takes
-~5–10 minutes. Cheap enough to run after every prompt edit.
+Cost per full run with 18 personas: roughly **$1–4** in API spend, takes
+~5–15 minutes. Cheap enough to run after every prompt edit.
+
+`--variant=both` doubles cost and time but is the right call before
+shipping an A/B test to real traffic — it catches regressions on the
+synthetic personas before any real visitor sees variant B.
+
+## Run on Replit (no local toolchain needed)
+
+For customers who don't want to install Node locally, or for always-on
+overnight runs:
+
+1. Fork the template Replit (linked from the install wizard's Step 6)
+2. Add `ANTHROPIC_API_KEY` to the Replit Secrets pane
+3. Hit Run, or set a Replit Scheduled Deployment to fire `npm run evals`
+   on a cron (matches what the `monthly-eval` routine does on
+   Anthropic's RemoteTrigger API — pick one, not both)
+
+**Optimization:** run A and B in parallel by forking the Replit into two
+copies, one per variant. Cuts the both-variant eval time roughly in
+half. Worth it for ad-hoc iteration; the monthly routine still runs
+both in sequence inside a single agent because it needs the comparison
+report to be coherent.
 
 ## Iteration loop
 
@@ -37,7 +60,7 @@ Cost per full run with 15 personas: roughly **$1–3** in API spend, takes
 
 ## Personas
 
-15 personas covering the realistic distribution:
+18 personas covering the realistic distribution:
 
 | Group | Personas |
 |---|---|

@@ -286,10 +286,12 @@ ready-to-commit edit back. See \`skills/README.md\`.
 | \`update-kb\` | Edit \`lib/knowledge.md\` | On-demand only |
 | \`refine-tone\` | Rewrite tone rules in \`lib/concierge.ts\` (never touches arc or KB) | On-demand only |
 | \`add-qualifying-rule\` | Add lead scoring / disqualifying signals; keeps \`scoring.ts\` and the system-prompt rubric in sync | On-demand only |
+| \`ab-test-prompt\` | Safely test a prompt change as variant B against production variant A — three-phase workflow (setup → pre-flight eval → real-traffic decision) | On-demand + weekly routine |
+| \`mine-transcripts-to-personas\` | Turn real failed conversations into durable eval personas. Closes the production-failure → eval-persona → fix → verified loop | On-demand + daily (auto-invoked for clusters of 3+) |
 | \`self-audit\` | Daily health check: webhook, logging, anomalies, reporting | On-demand + daily routine |
 | \`lessons-learned\` | Diagnose bad transcripts, propose fixes, append to \`lib/lessons-learned.md\` | On-demand + daily routine |
 | \`research-niche\` | Research the customer's vertical, propose KB additions | On-demand + weekly routine |
-| \`live-fire-test\` | Run the eval suite from \`scripts/evals/\` against current prompt | On-demand + monthly routine |
+| \`live-fire-test\` | Run the eval suite from \`scripts/evals/\` against current prompt; supports \`--variant=A | B | both\` | On-demand + monthly routine |
 
 ### 2. \`/routines/\` — scheduled cron jobs on the customer's Anthropic account
 JSON configs the wizard provisions via the RemoteTrigger API. They run on
@@ -299,9 +301,10 @@ and NEVER auto-commit anything except eval reports. See \`routines/README.md\`.
 | Routine | Cron | Skill it runs |
 |---|---|---|
 | \`daily-audit.json\` | Daily 12 UTC | self-audit |
-| \`daily-improvement.json\` | Daily 13 UTC | lessons-learned |
+| \`daily-improvement.json\` | Daily 13 UTC | lessons-learned + mine-transcripts-to-personas (clusters of 3+) |
 | \`weekly-research.json\` | Mon 14 UTC | research-niche |
-| \`monthly-eval.json\` | 1st 15 UTC | live-fire-test |
+| \`weekly-ab-evaluator.json\` | Mon 16 UTC | ab-test-prompt (Phase 3) — skips if B === A |
+| \`monthly-eval.json\` | 1st 15 UTC | live-fire-test (both variants) |
 
 Approval gate: every proposed change is emailed to the owner. They use
 the matching on-demand Skill template in their Claude Max to get a clean
@@ -324,6 +327,33 @@ Step 8 outputs the install snippet + the on-demand Skill templates.
 The wizard's job is to set up the customer's deployment. Once they finish,
 they own it forever and we have no operational involvement unless they
 hire us for ongoing work.
+
+### The refinement loop (how the bot gets better over time)
+
+The Skills compose into a closed iteration cycle:
+
+```
+real conversations
+    ↓
+daily-improvement routine (auto)
+    ↓ identifies failure clusters
+mine-transcripts-to-personas (auto for clusters of 3+)
+    ↓ proposes new eval persona for the failing archetype
+owner adds persona + applies proposed fix in one commit
+    ↓
+live-fire-test (monthly cron, or on demand)
+    ↓ confirms fix passes new persona + no regression
+ab-test-prompt (when the change is large enough)
+    ↓ tests B vs A on real traffic
+weekly-ab-evaluator routine recommends promote / revert
+    ↓
+back to top, with a more capable bot
+```
+
+The eval suite ships at 18 generic personas and grows organically as
+the bot encounters real visitors. After ~90 days of mining, the persona
+library is grounded in actual production failures the bot has seen and
+fixes that have actually shipped — making it the bot's regression test.
 
 ### Adjacent verticals
 

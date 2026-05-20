@@ -18,6 +18,8 @@ anything goes live.
 | [`update-kb`](./update-kb/SKILL.md) | Add to or change the bot's `knowledge.md` |
 | [`refine-tone`](./refine-tone/SKILL.md) | Adjust the bot's voice without breaking the conversation arc |
 | [`add-qualifying-rule`](./add-qualifying-rule/SKILL.md) | Add or change lead scoring / disqualifying signals |
+| [`ab-test-prompt`](./ab-test-prompt/SKILL.md) | Safely test a prompt change as variant B against production variant A |
+| [`mine-transcripts-to-personas`](./mine-transcripts-to-personas/SKILL.md) | Turn real failed conversations into durable eval personas |
 
 ## Scheduled skills (run on a routine + on demand)
 
@@ -26,7 +28,34 @@ anything goes live.
 | [`self-audit`](./self-audit/SKILL.md) | Daily | Health-check the bot, webhook, reporting pipeline; flag anomalies |
 | [`lessons-learned`](./lessons-learned/SKILL.md) | Daily | Read recent failures, propose prompt/KB tweaks, log to lessons file |
 | [`research-niche`](./research-niche/SKILL.md) | Weekly | Research the bot's niche; propose KB additions with sources |
+| [`ab-test-prompt`](./ab-test-prompt/SKILL.md) | Weekly (when an experiment is active) | Compare A vs B on real traffic + eval, propose promote/revert/continue |
 | [`live-fire-test`](./live-fire-test/SKILL.md) | Monthly | Run the persona eval suite, surface regressions |
+
+## The refinement loop
+
+Five of these skills compose into a closed iteration cycle:
+
+```
+real conversations
+   ↓
+lessons-learned (daily)
+   ↓ identifies failure clusters (3+ instances)
+mine-transcripts-to-personas (auto-invoked by daily routine)
+   ↓ proposes new eval persona for the archetype
+owner adds persona + applies proposed fix in one commit
+   ↓
+live-fire-test (run on demand, monthly cron)
+   ↓ confirms fix passes new persona + no regression
+ab-test-prompt (when the change is large enough to warrant)
+   ↓ tests B vs A on real traffic
+weekly ab-evaluator routine recommends promote / revert
+   ↓
+back to top, with a more capable bot
+```
+
+The bot's regression test gradually becomes a record of every weird
+visitor it has ever encountered. After 90 days the persona library is
+worth more than the original prompt.
 
 ## How to use a skill
 
