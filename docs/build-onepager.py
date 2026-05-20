@@ -21,7 +21,7 @@ SAND = HexColor("#EFEAE0")      # subtle bg (warmer than pure gray)
 CREAM = HexColor("#FAFAF7")     # near-white
 
 doc = SimpleDocTemplate(
-    "docs/groundwork-one-pager.pdf",
+    "docs/complete-barndo-solutions-one-pager.pdf",
     pagesize=letter,
     leftMargin=0.5 * inch, rightMargin=0.5 * inch,
     topMargin=0.45 * inch, bottomMargin=0.45 * inch,
@@ -190,4 +190,4 @@ story.append(Paragraph(
 # Force everything onto a single page — KeepInFrame shrinks if it overflows
 frame = KeepInFrame(7.5 * inch, 10.1 * inch, story, mode="shrink")
 doc.build([frame])
-print("Wrote docs/groundwork-one-pager.pdf")
+print("Wrote docs/complete-barndo-solutions-one-pager.pdf")
