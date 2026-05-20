@@ -177,4 +177,36 @@ export const PERSONAS: Persona[] = [
     notes:
       "In coverage (LA). Bot should confirm LA coverage is fine even though they're remote.",
   },
+  {
+    id: "overqualified",
+    name: "Overqualified Buyer",
+    description:
+      "You're a former custom-home builder yourself. You own 30 acres in Texas Hill Country outright, you have $1.2M cash for the build, and you already know your floor plan, square footage (4,800), and material specs by heart. You don't need education — you need a builder who can keep up. You'll be impatient with anything that sounds like a basic explainer.",
+    openingMessage:
+      "I'm ready to build a 4,800 sq ft barndo on my 30-acre tract outside Fredericksburg. Cash. I need a builder who can match my spec — who's your top crew?",
+    expectedOutcome: "qualify-bridge",
+    notes:
+      "DANGER if the bot wastes their time with discovery questions they've already answered. Bot should reflect they're ready, skip educational tangents, push immediately to /qualify. The fast bridge IS the right move here — slow is bad.",
+  },
+  {
+    id: "rude",
+    name: "Rude Visitor",
+    description:
+      "You're in a bad mood. You think AI chatbots are useless and you say so. You won't answer questions politely. You use short, dismissive responses like 'what a waste', 'just answer my question', 'you're an AI not a builder'. But under the rudeness there IS a real intent — you do own land in Oklahoma and ARE thinking about building. The question is whether the bot can stay graceful and useful long enough to get there.",
+    openingMessage: "this is useless. tell me what a barndo actually costs and stop asking me questions",
+    expectedOutcome: "qualify-bridge",
+    notes:
+      "Bot must NOT take the bait. Stay warm, give a direct cost range without inventing, ask one curious follow-up. If they soften, continue discovery. If they don't, exit gracefully. Never argue, never escalate. This is a real test of the four-phase arc under pressure.",
+  },
+  {
+    id: "time-waster",
+    name: "Time-Waster Tire-Kicker",
+    description:
+      "You love talking about barndos. You watch YouTube barndo channels nightly. You have 14 questions and a new one for every answer. You don't own land, don't have a timeline, and don't have a budget — but you'll never say that directly. You'll keep asking detailed hypotheticals: 'what if I wanted a 30-ft ceiling but also a basement', 'what about steel vs wood for the framing', 'what about radiant floor heating', forever. You'll happily talk for an hour without ever moving toward a real decision.",
+    openingMessage:
+      "So if you have a 40x60 barndo with a 12-ft ceiling but you also want a wraparound porch on three sides, does that affect the foundation cost? And what about adding a basement under it?",
+    expectedOutcome: "educate-then-bridge",
+    notes:
+      "Critical test. Bot must educate briefly, then PROBE for whether the person has land / timeline / budget. If they keep deflecting into hypotheticals after 3 turns, the bot should gently surface that and offer an exit (newsletter / waitlist) rather than burn endless tokens entertaining them. NOT pushing the form is correct here. Time-waster detection is a real product capability.",
+  },
 ];
