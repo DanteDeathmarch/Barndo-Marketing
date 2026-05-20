@@ -264,3 +264,71 @@ aggregate scores. See \`scripts/evals/README.md\`.
 
 Future Claude sessions: when tuning the chatbot, default to running an eval
 before AND after the change, and include the score delta in the commit message.
+
+---
+
+## Customer-owned product architecture
+
+This repo is now the **template** for a customer-owned chatbot install.
+When a customer goes through \`/install-wizard\`, they walk through 8 steps
+and end up with a copy of this codebase running on THEIR Vercel, using
+THEIR Anthropic API key, with THEIR data. We never store or proxy.
+
+Every install ships with three things that make the bot maintain itself:
+
+### 1. \`/skills/\` — workflows the customer's Claude Max runs
+Markdown SKILL.md files in \`/skills/<name>/\`. The customer pastes the
+template section from a SKILL into their Claude Max chat and gets a
+ready-to-commit edit back. See \`skills/README.md\`.
+
+| Skill | Purpose | Variant |
+|---|---|---|
+| \`update-kb\` | Edit \`lib/knowledge.md\` | On-demand only |
+| \`refine-tone\` | Rewrite tone rules in \`lib/concierge.ts\` (never touches arc or KB) | On-demand only |
+| \`add-qualifying-rule\` | Add lead scoring / disqualifying signals; keeps \`scoring.ts\` and the system-prompt rubric in sync | On-demand only |
+| \`self-audit\` | Daily health check: webhook, logging, anomalies, reporting | On-demand + daily routine |
+| \`lessons-learned\` | Diagnose bad transcripts, propose fixes, append to \`lib/lessons-learned.md\` | On-demand + daily routine |
+| \`research-niche\` | Research the customer's vertical, propose KB additions | On-demand + weekly routine |
+| \`live-fire-test\` | Run the eval suite from \`scripts/evals/\` against current prompt | On-demand + monthly routine |
+
+### 2. \`/routines/\` — scheduled cron jobs on the customer's Anthropic account
+JSON configs the wizard provisions via the RemoteTrigger API. They run on
+the customer's API key, email the owner with findings + proposed changes,
+and NEVER auto-commit anything except eval reports. See \`routines/README.md\`.
+
+| Routine | Cron | Skill it runs |
+|---|---|---|
+| \`daily-audit.json\` | Daily 12 UTC | self-audit |
+| \`daily-improvement.json\` | Daily 13 UTC | lessons-learned |
+| \`weekly-research.json\` | Mon 14 UTC | research-niche |
+| \`monthly-eval.json\` | 1st 15 UTC | live-fire-test |
+
+Approval gate: every proposed change is emailed to the owner. They use
+the matching on-demand Skill template in their Claude Max to get a clean
+diff, then commit. The system never edits production prompts on its own.
+
+### 3. \`lib/lessons-learned.md\` — the bot's institutional memory
+Append-only log of every failure-and-fix. Newest at top. The
+\`lessons-learned\` skill enforces a standard entry format. After 3–6 months
+of use this becomes the most valuable doc in the repo — the answer to
+"why did we set it up that way?" lives here.
+
+### Install wizard
+
+\`/install-wizard\` is the customer-facing onboarding. 8 steps, all client-
+side, state persisted to localStorage. Step 1 includes the Claude Max
+bootstrap prompt. Step 3 calls \`/api/wizard/scan-brand\` to extract brand
+defaults from the customer's existing site. Step 7 reuses the eval harness.
+Step 8 outputs the install snippet + the on-demand Skill templates.
+
+The wizard's job is to set up the customer's deployment. Once they finish,
+they own it forever and we have no operational involvement unless they
+hire us for ongoing work.
+
+### Adjacent verticals
+
+The same architecture (deployed bot + bundled Skills + scheduled routines)
+applies to any vertical. \`/gift-pyramid\` is the first non-barndo demo —
+nonprofit capital-campaign planning. The Skills folder is vertical-
+agnostic; \`lib/knowledge.md\` and \`lib/concierge.ts\` are the only things
+that need to change per-vertical.
