@@ -165,6 +165,7 @@ export default function InstallWizard() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (raw) setState({ ...INITIAL, ...JSON.parse(raw) });
     } catch {
       /* ignore */
@@ -328,7 +329,7 @@ function StepWelcome({ onContinue }: { onContinue: () => void }) {
         <h3 className="font-semibold text-sm mb-2">B. Prime your Claude (this conversation)</h3>
         <p className="text-xs text-stone-700 mb-2">
           Copy this and paste it as your next message to Claude. It tells
-          Claude what you're installing so it knows what workflows to be
+          Claude what you&apos;re installing so it knows what workflows to be
           ready for.
         </p>
         <pre className="bg-stone-900 text-stone-50 rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap">
