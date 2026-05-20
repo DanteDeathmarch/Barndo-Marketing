@@ -423,9 +423,97 @@ function StepBrand({
   update: <K extends keyof WizardState>(k: K, v: WizardState[K]) => void;
   onContinue: () => void;
 }) {
+  const [scanState, setScanState] = useState<
+    "idle" | "scanning" | "scanned" | "error"
+  >("idle");
+  const [scanError, setScanError] = useState("");
+
+  async function scanSite() {
+    if (!state.siteUrl.trim()) return;
+    setScanState("scanning");
+    setScanError("");
+    try {
+      const res = await fetch("/api/wizard/scan-brand", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: state.siteUrl }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setScanState("error");
+        setScanError(data.error ?? "Scan failed");
+        return;
+      }
+      const b = data.brand;
+      update("siteTitle", b.title ?? "");
+      update("siteTagline", b.tagline ?? "");
+      update("siteFonts", b.fontHints ?? []);
+      if (b.themeColor && /^#[0-9a-f]{3,8}$/i.test(b.themeColor)) {
+        update("brandColor", b.themeColor);
+      }
+      if (b.logoUrl) update("logoUrl", b.logoUrl);
+      else if (b.faviconUrl) update("logoUrl", b.faviconUrl);
+      setScanState("scanned");
+    } catch (err) {
+      setScanState("error");
+      setScanError(err instanceof Error ? err.message : "Scan failed");
+    }
+  }
+
   const ready = state.toneWords.trim().length > 0;
   return (
     <div className="space-y-5">
+      {/* Site scan */}
+      <div className="rounded-md border border-sand bg-sand/30 p-4">
+        <label className="text-sm block">
+          <span className="block font-semibold text-ink mb-1">
+            Your website URL (we&apos;ll scan it to pre-fill defaults)
+          </span>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={state.siteUrl}
+              onChange={(e) => update("siteUrl", e.target.value)}
+              placeholder="https://yourcompany.com"
+              className="flex-1 rounded-md border border-sand bg-cream px-3 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={scanSite}
+              disabled={!state.siteUrl.trim() || scanState === "scanning"}
+              className="rounded-md bg-rust px-4 py-2 text-sm font-semibold text-cream hover:bg-rust-dark disabled:opacity-50"
+            >
+              {scanState === "scanning" ? "Scanning…" : "Scan site"}
+            </button>
+          </div>
+        </label>
+        {scanState === "scanned" && (
+          <p className="mt-2 text-xs text-pine">
+            ✓ Scanned. Fields below are pre-filled from your site; edit anything you want.
+          </p>
+        )}
+        {scanState === "error" && (
+          <p className="mt-2 text-xs text-rust">⚠ {scanError}</p>
+        )}
+        {state.siteTitle && (
+          <div className="mt-3 text-xs text-charcoal space-y-1">
+            <div>
+              <strong>Title:</strong> {state.siteTitle}
+            </div>
+            {state.siteTagline && (
+              <div>
+                <strong>Tagline:</strong> {state.siteTagline}
+              </div>
+            )}
+            {state.siteFonts.length > 0 && (
+              <div>
+                <strong>Fonts:</strong> {state.siteFonts.slice(0, 3).join(", ")}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
         <label className="text-sm">
           <span className="block font-semibold text-ink mb-1">Brand color</span>

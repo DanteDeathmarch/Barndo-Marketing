@@ -85,6 +85,10 @@ export interface WizardState {
   // Step 2
   anthropicKey: string;
   // Step 3
+  siteUrl: string;
+  siteTitle: string;
+  siteTagline: string;
+  siteFonts: string[];
   brandColor: string;
   brandColorAccent: string;
   logoUrl: string;
@@ -108,6 +112,10 @@ export const INITIAL_STATE: WizardState = {
   currentStep: "welcome",
   completed: [],
   anthropicKey: "",
+  siteUrl: "",
+  siteTitle: "",
+  siteTagline: "",
+  siteFonts: [],
   brandColor: "#9a3324",
   brandColorAccent: "#1f1b16",
   logoUrl: "",
