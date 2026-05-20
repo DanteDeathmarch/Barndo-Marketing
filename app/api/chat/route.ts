@@ -78,6 +78,22 @@ export async function POST(req: Request) {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store",
       "x-bot-variant": variant,
+      // CORS: allow the artifact (hosted on claude.ai) to probe this endpoint
+      // for live verification. The widget script-tag deploy is same-origin so
+      // this doesn't affect production embedding.
+      "Access-Control-Allow-Origin": "https://claude.ai",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
+}
+
+export async function OPTIONS() {
+  return new Response(null, {
+    headers: {
+      "Access-Control-Allow-Origin": "https://claude.ai",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
     },
   });
 }
