@@ -1,4 +1,4 @@
-# One-shot script: generate the Groundwork-branded one-page PDF.
+# One-shot script: generate the Complete Barndo Solutions-branded one-pager.
 # Run from repo root:  python docs/build-onepager.py
 
 from reportlab.lib.pagesizes import letter
@@ -10,26 +10,29 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepInFrame,
 )
 
-# Groundwork palette — earth tones, operator vibe
-INK = HexColor("#1F1B16")       # near-black for body
-CHARCOAL = HexColor("#3D3D3D")  # secondary body
-STEEL = HexColor("#6B6B6B")     # captions
-AMBER = HexColor("#B8650A")     # accent
-SAND = HexColor("#E8E2D4")      # subtle bg
-CREAM = HexColor("#FBF8F1")     # page bg substitute via table fills
+# Complete Barndo Solutions palette — restrained, professional, builder
+# neutral. Site is charcoal text on white with no flashy accents; we add
+# a single barn-rust for emphasis only (echoing "barndo" without being loud).
+INK = HexColor("#1A1A1A")       # charcoal (matches site body color)
+CHARCOAL = HexColor("#333333")  # secondary body
+STEEL = HexColor("#6E6E6E")     # captions
+AMBER = HexColor("#8B3A1F")     # barn-rust accent — used sparingly
+SAND = HexColor("#EFEAE0")      # subtle bg (warmer than pure gray)
+CREAM = HexColor("#FAFAF7")     # near-white
 
 doc = SimpleDocTemplate(
     "docs/groundwork-one-pager.pdf",
     pagesize=letter,
     leftMargin=0.5 * inch, rightMargin=0.5 * inch,
     topMargin=0.45 * inch, bottomMargin=0.45 * inch,
-    title="Customer-Owned Conversion Bot",
-    author="Groundwork Agency",
+    title="Customer-Owned Conversion Bot — Complete Barndo Solutions",
+    author="Complete Barndo Solutions",
 )
 
-H1 = ParagraphStyle("H1", fontName="Times-Bold", fontSize=22, leading=24, textColor=INK, spaceAfter=4)
+# Sans throughout to match the site. Single accent (barn-rust) for the tagline + section heads only.
+H1 = ParagraphStyle("H1", fontName="Helvetica-Bold", fontSize=22, leading=24, textColor=INK, spaceAfter=4)
 TAG = ParagraphStyle("TAG", fontName="Helvetica-Oblique", fontSize=10, leading=12, textColor=AMBER, spaceAfter=10)
-H2 = ParagraphStyle("H2", fontName="Times-Bold", fontSize=11, leading=13, textColor=AMBER, spaceBefore=8, spaceAfter=3, alignment=TA_LEFT)
+H2 = ParagraphStyle("H2", fontName="Helvetica-Bold", fontSize=11, leading=13, textColor=AMBER, spaceBefore=8, spaceAfter=3, alignment=TA_LEFT)
 BODY = ParagraphStyle("BODY", fontName="Helvetica", fontSize=8.5, leading=11, textColor=CHARCOAL, spaceAfter=4)
 SMALL = ParagraphStyle("SMALL", fontName="Helvetica", fontSize=7.5, leading=9.5, textColor=STEEL, spaceAfter=3)
 FOOT = ParagraphStyle("FOOT", fontName="Helvetica-Oblique", fontSize=7.5, leading=10, textColor=STEEL, spaceBefore=6)
@@ -38,13 +41,15 @@ story = []
 
 # Header
 story.append(Paragraph("Your own qualifying chatbot. On your stack. Forever.", H1))
-story.append(Paragraph("GROUNDWORK AGENCY  ·  marketing built by business owners, for service businesses", TAG))
+story.append(Paragraph("COMPLETE BARNDO SOLUTIONS  ·  barndominium builders who handle every step", TAG))
 
 # Intro
 story.append(Paragraph(
-    "A conversion concierge that lives on your website, qualifies visitors through "
-    "conversation (not forms), and routes hot leads into your CRM. You own every "
-    "piece of it — your data never touches us.",
+    "A conversion concierge that lives on completebarndosolutions.com, qualifies "
+    "landowners through conversation (not forms), and routes hot leads into your "
+    "pipeline. You own every piece of it — your customers' data never touches anyone "
+    "else. Honest pricing, clear expectations, transparent communication — the way "
+    "you already do business.",
     BODY,
 ))
 
@@ -53,10 +58,11 @@ story.append(Paragraph("What you get", H2))
 story.append(Paragraph(
     "A chat widget that drops onto your site with one &lt;script&gt; tag. Behind it: "
     "Claude Sonnet 4.6 configured to <b>your</b> voice, <b>your</b> qualifying criteria, "
-    "and <b>your</b> knowledge base. It runs a four-phase discovery arc — opens with a "
-    "question, draws out specifics one at a time, reflects the visitor's situation back "
-    "as a vision statement, then bridges to your CTA (book / form / quote). It speaks like "
-    "you, knows what you sell, and knows what a good lead looks like for <b>your</b> business.",
+    "and <b>your</b> knowledge base (TX/TN/OK/LA coverage, turnkey one-contract model, "
+    "barndo-financing realities). It runs a four-phase discovery arc — opens with a "
+    "question about the visitor's land, draws out specifics one at a time, reflects the "
+    "project back as a vision statement, then bridges to your regional builder. It speaks "
+    "like a Complete Barndo Solutions consultant.",
     BODY,
 ))
 
@@ -176,8 +182,8 @@ story.append(Paragraph(
 
 # Footer
 story.append(Paragraph(
-    "Built by Groundwork Agency for builders who want infrastructure they own — "
-    "not subscriptions that own them.  ·  groundwork-draft.vercel.app",
+    "Built for Complete Barndo Solutions — barndominium builders who handle every step. "
+    "·  completebarndosolutions.com  ·  TX  ·  TN  ·  OK  ·  LA",
     FOOT,
 ))
 
