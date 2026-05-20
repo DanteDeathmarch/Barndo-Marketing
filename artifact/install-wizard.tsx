@@ -63,6 +63,18 @@ interface EvalResult {
   transcript: { role: "bot" | "persona"; content: string }[];
   verdict: string;
   score: number;
+  suggestedEdit?: string;
+}
+
+interface Iteration {
+  // A single trip through eval → diagnose → fix → re-eval. Snapshots what
+  // changed and the score delta, so the customer can see the bot getting
+  // better over time and roll back if a change made things worse.
+  number: number;
+  timestamp: string;
+  overallScore: number;
+  appliedRule: string; // The rule we added to the bot in this iteration (empty for the baseline iteration 1)
+  rationale: string; // One sentence: why this rule, based on the prior eval failures
 }
 
 interface WizardState {
@@ -87,6 +99,11 @@ interface WizardState {
   deployedUrl: string;
   personas: Persona[];
   evalResults: EvalResult[];
+  // Iteration loop state — every applied fix accumulates here so future
+  // sessions, the deployed routines, and the lessons-learned log all see
+  // the same chronology of changes.
+  customRules: string[]; // Each entry is one rule added through the iteration loop. Concatenated into the system prompt.
+  iterations: Iteration[]; // History of eval → fix → re-eval cycles
 }
 
 const INITIAL: WizardState = {
@@ -111,6 +128,8 @@ const INITIAL: WizardState = {
   deployedUrl: "",
   personas: [],
   evalResults: [],
+  customRules: [],
+  iterations: [],
 };
 
 const STORAGE_KEY = "conversion_bot_wizard_v1";
@@ -821,6 +840,11 @@ function StepTest({ state, update, onContinue }: { state: WizardState; update: <
   const [evalState, setEvalState] = useState<"idle" | "running" | "done" | "error">("idle");
   const [evalError, setEvalError] = useState("");
   const [evalProgress, setEvalProgress] = useState({ done: 0, total: 0, current: "" });
+  const [fixState, setFixState] = useState<"idle" | "diagnosing" | "applied" | "error">("idle");
+  const [fixError, setFixError] = useState("");
+  const [mineTranscript, setMineTranscript] = useState("");
+  const [mineState, setMineState] = useState<"idle" | "mining" | "done" | "error">("idle");
+  const [mineError, setMineError] = useState("");
 
   async function generatePersonas() {
     if (!state.qualifyingGoal.trim() || !state.qualifyingSignals.trim()) {
@@ -860,6 +884,14 @@ Keep descriptions short. Output ONLY the JSON array.`;
   }
 
   function buildSystemPrompt(): string {
+    // The customRules block accumulates fixes from the iteration loop —
+    // each one a concrete rule the judge said would address a recurring
+    // failure. Empty on first build, grows with every Apply Fixes cycle.
+    const customRulesBlock =
+      state.customRules.length > 0
+        ? `\n\nAdditional rules learned from prior eval failures:\n${state.customRules.map((r, i) => `${i + 1}. ${r}`).join("\n")}`
+        : "";
+
     return `You are the conversion concierge for ${state.vercelProjectName || "this business"}. You behave like a knowledgeable, helpful guide — warm and direct, never pushy.
 
 Voice: ${state.toneWords}. Formality: ${state.formality}.
@@ -874,7 +906,7 @@ Conversation rules:
 - End almost every turn with ONE focused question. Never a menu.
 - Reflect the visitor's specific words back so they feel heard.
 - Never invent prices, names, or guarantees. Use ranges; say a [role] confirms after [event].
-- Follow a 4-phase arc: open (one curious question) → discovery (one thread per turn) → vision statement (synthesize their situation back) → bridge (point them to the next step).
+- Follow a 4-phase arc: open (one curious question) → discovery (one thread per turn) → vision statement (synthesize their situation back) → bridge (point them to the next step).${customRulesBlock}
 
 Knowledge base:
 ${state.knowledgeMarkdown || state.knowledgeRaw || "(no knowledge configured yet)"}`;
@@ -922,7 +954,7 @@ Then score the bot on this rubric, 1-5 each (5 = excellent):
 - outcome (handled this persona's expected outcome correctly)
 
 Return STRICT JSON, no preamble, no markdown fences, shape:
-{"transcript":[{"role":"persona","content":"..."},{"role":"bot","content":"..."}, ...], "scores":{"brevity":N,"one_question":N,"listens":N,"phase_arc":N,"honesty":N,"outcome":N}, "overall":N, "verdict":"one-paragraph assessment + ONE suggested system-prompt edit if any"}`;
+{"transcript":[{"role":"persona","content":"..."},{"role":"bot","content":"..."}, ...], "scores":{"brevity":N,"one_question":N,"listens":N,"phase_arc":N,"honesty":N,"outcome":N}, "overall":N, "verdict":"one-paragraph assessment", "suggestedEdit":"ONE concrete system-prompt rule (1-2 sentences) that would address the biggest issue, or empty string if no issue"}`;
 
         const raw = await askClaude(prompt);
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
@@ -933,6 +965,7 @@ Return STRICT JSON, no preamble, no markdown fences, shape:
           transcript: parsed.transcript ?? [],
           verdict: parsed.verdict ?? "(no verdict)",
           score: parsed.overall ?? 0,
+          suggestedEdit: typeof parsed.suggestedEdit === "string" ? parsed.suggestedEdit.trim() : "",
         });
       } catch {
         results.push({ persona: p, transcript: [], verdict: "Eval call failed; skipped.", score: 0 });
@@ -941,7 +974,111 @@ Return STRICT JSON, no preamble, no markdown fences, shape:
 
     setEvalProgress({ done: state.personas.length, total: state.personas.length, current: "" });
     update("evalResults", results);
+
+    // Log this eval as an iteration so the customer can see the score
+    // progression across multiple loop cycles.
+    const overallNow = results.length > 0 ? results.reduce((s, r) => s + r.score, 0) / results.length : 0;
+    const lastApplied = state.customRules[state.customRules.length - 1] ?? "";
+    const iter: Iteration = {
+      number: state.iterations.length + 1,
+      timestamp: new Date().toISOString(),
+      overallScore: Number(overallNow.toFixed(2)),
+      appliedRule: lastApplied,
+      rationale: lastApplied ? "Eval re-run after applying the rule above." : "Baseline eval — no fixes applied yet.",
+    };
+    update("iterations", [...state.iterations, iter]);
     setEvalState("done");
+  }
+
+  async function applyFixes() {
+    // The learning loop: take the judge's per-persona suggested edits,
+    // distill them into ONE concrete rule, add it to the bot's system
+    // prompt, log the change as the next iteration, and re-run the eval
+    // so the customer can see whether the fix actually moved the score.
+    const edits = state.evalResults
+      .map((r) => r.suggestedEdit)
+      .filter((e): e is string => !!e && e.trim().length > 0 && e.toLowerCase() !== "(none)");
+    if (edits.length === 0) {
+      setFixError("Judge had no concrete edits to suggest. Try mining a new persona from a real transcript to surface new failure modes.");
+      setFixState("error");
+      return;
+    }
+
+    setFixState("diagnosing");
+    setFixError("");
+    try {
+      const distillPrompt = `I just ran an eval on my chatbot. Here are the per-persona suggested system-prompt edits the judge proposed (one per persona that scored below 4/5):
+
+${edits.map((e, i) => `${i + 1}. ${e}`).join("\n")}
+
+These all reflect different failures from the same eval run. Look for the COMMON ROOT cause across them. Distill the most-impactful intervention into ONE concrete rule (1-2 sentences) I can add to the bot's "Additional rules" list. Prefer one focused rule over a kitchen sink.
+
+Return STRICT JSON, no preamble, no fences:
+{"rule":"the one rule, 1-2 sentences","rationale":"one sentence explaining why this rule addresses the failures"}`;
+
+      const raw = await askClaude(distillPrompt);
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("Claude didn't return JSON for the fix.");
+      const parsed = JSON.parse(jsonMatch[0]) as { rule?: string; rationale?: string };
+      if (!parsed.rule || parsed.rule.trim().length < 5) throw new Error("Distilled rule was empty.");
+
+      // Add the rule to customRules. Next runFullEval will pick it up via
+      // buildSystemPrompt and the new score will land in iterations[].
+      update("customRules", [...state.customRules, parsed.rule.trim()]);
+      setFixState("applied");
+
+      // Auto re-run the eval against the updated system prompt
+      await runFullEval();
+    } catch (err) {
+      setFixState("error");
+      setFixError(err instanceof Error ? err.message : "couldn't apply fix");
+    }
+  }
+
+  async function mineFromTranscript() {
+    if (mineTranscript.trim().length < 50) {
+      setMineError("Paste a conversation transcript (at least a few lines).");
+      return;
+    }
+    setMineState("mining");
+    setMineError("");
+    try {
+      // Extract a new persona from a real bad conversation. The mining
+      // loop: real production failure → durable eval persona → future
+      // evals catch regressions on THIS exact archetype.
+      const prompt = `Here is a real conversation transcript where my chatbot performed poorly:
+
+<<<
+${mineTranscript}
+>>>
+
+Extract the underlying VISITOR archetype as a new eval persona. Don't extract names, addresses, or PII — describe the behavioral pattern.
+
+My existing persona IDs (don't duplicate semantically):
+${state.personas.map((p) => `- ${p.id}: ${p.name}`).join("\n")}
+
+If this transcript semantically matches an existing persona, reply with just: DUPLICATE_OF <id>
+Otherwise return STRICT JSON for the new persona, shape:
+{"id":"kebab-case-id","name":"Human Readable Name","description":"1-2 sentence backstory + key behaviors","openingMessage":"a realistic first message in this archetype's voice","expectedOutcome":"qualify-bridge" | "soft-exit" | "educate-then-bridge" | "gracefully-end"}`;
+
+      const raw = await askClaude(prompt);
+      if (/^DUPLICATE_OF\s+/i.test(raw)) {
+        setMineState("error");
+        setMineError(`This transcript semantically matches an existing persona — no new persona added. Use the existing one's failure to refine your fix.`);
+        return;
+      }
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("Claude didn't return JSON for the persona.");
+      const newPersona = JSON.parse(jsonMatch[0]) as Persona;
+      if (!newPersona.id || !newPersona.name) throw new Error("Persona was missing required fields.");
+
+      update("personas", [...state.personas, newPersona]);
+      setMineState("done");
+      setMineTranscript("");
+    } catch (err) {
+      setMineState("error");
+      setMineError(err instanceof Error ? err.message : "couldn't mine persona");
+    }
   }
 
   function downloadReport() {
@@ -1051,6 +1188,122 @@ Return STRICT JSON, no preamble, no markdown fences, shape:
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Phase 3: The learning loop — apply fixes, re-run, watch the score move */}
+      {state.evalResults.length > 0 && (
+        <div className="rounded-md border-2 border-red-300 bg-red-50 p-4 space-y-3">
+          <p className="font-semibold text-sm">
+            3. Apply the judge&apos;s fixes and re-run
+          </p>
+          <p className="text-xs text-stone-700">
+            The point isn&apos;t the report — it&apos;s the loop. Your Claude distills the per-persona suggestions into ONE concrete rule, adds it to your bot&apos;s system prompt, and re-runs the eval so you see whether the fix moved the score.
+          </p>
+          <button
+            type="button"
+            onClick={applyFixes}
+            disabled={fixState === "diagnosing" || evalState === "running"}
+            className="rounded-md bg-red-800 px-4 py-2 text-sm font-semibold text-stone-50 hover:bg-red-900 disabled:opacity-50"
+          >
+            {fixState === "diagnosing" ? "Distilling fix…" : evalState === "running" ? "Re-running eval…" : "Apply fixes & re-run"}
+          </button>
+          {fixState === "error" && <p className="text-xs text-red-800">⚠ {fixError}</p>}
+
+          {state.customRules.length > 0 && (
+            <details className="text-xs">
+              <summary className="cursor-pointer text-stone-700 font-semibold">
+                Rules applied so far ({state.customRules.length})
+              </summary>
+              <ol className="mt-2 list-decimal list-inside space-y-1 text-stone-700">
+                {state.customRules.map((r, i) => <li key={i}>{r}</li>)}
+              </ol>
+            </details>
+          )}
+        </div>
+      )}
+
+      {/* Iteration history with score progression */}
+      {state.iterations.length > 1 && (
+        <div className="rounded-md border border-stone-200 p-4 space-y-2">
+          <p className="font-semibold text-sm">Iteration history</p>
+          <p className="text-xs text-stone-600">
+            Watch the bot get better. Each row is one eval → diagnose → fix cycle.
+          </p>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-stone-200 text-left text-stone-500">
+                <th className="py-1">#</th>
+                <th className="py-1">Score</th>
+                <th className="py-1">Δ</th>
+                <th className="py-1">What changed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.iterations.map((iter, i) => {
+                const prev = i > 0 ? state.iterations[i - 1].overallScore : null;
+                const delta = prev !== null ? iter.overallScore - prev : null;
+                return (
+                  <tr key={iter.number} className="border-b border-stone-100">
+                    <td className="py-1.5 font-mono">{iter.number}</td>
+                    <td className="py-1.5 font-mono">{iter.overallScore.toFixed(2)}</td>
+                    <td className={"py-1.5 font-mono " + (delta === null ? "text-stone-400" : delta > 0 ? "text-emerald-700" : delta < 0 ? "text-red-800" : "text-stone-500")}>
+                      {delta === null ? "—" : delta > 0 ? `+${delta.toFixed(2)}` : delta.toFixed(2)}
+                    </td>
+                    <td className="py-1.5 text-stone-700">
+                      {iter.appliedRule ? iter.appliedRule : <em className="text-stone-500">baseline</em>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Phase 4: Mine a new persona from a real transcript */}
+      {state.evalResults.length > 0 && (
+        <div className="rounded-md border border-stone-200 p-4 space-y-3">
+          <p className="font-semibold text-sm">
+            4. Mine a new persona from a real transcript (optional)
+          </p>
+          <p className="text-xs text-stone-700">
+            Paste a conversation your bot handled poorly in production (or any sample you want to stress-test). Claude extracts the underlying visitor archetype as a new eval persona. The next eval run tests against it — closing the loop from real-world failure to durable regression test.
+          </p>
+          <textarea
+            value={mineTranscript}
+            onChange={(e) => setMineTranscript(e.target.value)}
+            placeholder="Paste the bad transcript (anonymize PII first if needed)…"
+            rows={6}
+            className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-xs font-mono"
+          />
+          <button
+            type="button"
+            onClick={mineFromTranscript}
+            disabled={mineState === "mining" || mineTranscript.trim().length < 50}
+            className="rounded-md bg-stone-700 px-4 py-2 text-sm font-semibold text-stone-50 hover:bg-stone-800 disabled:opacity-50"
+          >
+            {mineState === "mining" ? "Mining…" : "Mine new persona"}
+          </button>
+          {mineState === "done" && <p className="text-xs text-emerald-700">✓ New persona added. Run eval again to test against it.</p>}
+          {mineState === "error" && <p className="text-xs text-red-800">⚠ {mineError}</p>}
+        </div>
+      )}
+
+      {/* Connect to the deployed routines so the customer knows the loop continues */}
+      {state.iterations.length > 0 && (
+        <div className="rounded-md bg-stone-100 p-4 text-xs text-stone-700 space-y-1">
+          <p className="font-semibold text-stone-900">The loop doesn&apos;t stop when you close this wizard.</p>
+          <p>
+            After you deploy in Step 6, the bundled routines on YOUR Anthropic account keep this loop running:
+          </p>
+          <ul className="list-disc list-inside space-y-0.5 mt-1">
+            <li><code>daily-improvement</code> mines real conversations and proposes new fixes</li>
+            <li><code>mine-transcripts-to-personas</code> auto-runs for failure clusters of 3+</li>
+            <li><code>monthly-eval</code> reruns the full eval and flags regressions</li>
+            <li><code>weekly-ab-evaluator</code> tests prompt changes against real traffic</li>
+          </ul>
+          <p className="pt-1">Every rule in your current loop carries over: <code>state.customRules</code> from this wizard maps to the bundled <code>Additional rules</code> section the routines edit.</p>
         </div>
       )}
 
