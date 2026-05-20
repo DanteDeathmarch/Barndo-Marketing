@@ -215,44 +215,149 @@ function StepWelcome({ onContinue }: { onContinue: () => void }) {
     { name: "Replit", url: "https://replit.com/", why: "One-click fork of our template; in-browser editing if you want it." },
     { name: "GitHub", url: "https://github.com/join", why: "Source of truth. Vercel watches it; you control history." },
   ];
+
+  const recommendedSkills = [
+    { name: "copywriting", why: "Refining the bot's voice when you want it sharper" },
+    { name: "customer-research", why: "Mining your own conversation transcripts for patterns" },
+    { name: "sales-enablement", why: "Building objection-handling additions to the KB" },
+    { name: "page-cro", why: "Optimizing the landing pages your bot drives traffic to" },
+    { name: "ab-test-setup", why: "Running structured experiments on variant prompts" },
+  ];
+
+  const stackChecks = [
+    { name: "gh CLI", how: "winget install GitHub.cli (Windows) · brew install gh (Mac)" },
+    { name: "vercel CLI", how: "npx vercel — no install, runs first time" },
+    { name: "Node.js 20+", how: "nodejs.org/download — required for local edits" },
+    { name: "Git", how: "git-scm.com/download — Vercel needs your repo to deploy" },
+  ];
+
+  const bootstrapPrompt = `I am installing the [BOT NAME] customer-qualifying chatbot on my own stack.
+I own everything — my Anthropic API key, my Vercel project, my data.
+
+Please be ready to help me with these workflows as they come up:
+
+1. UPDATE-KB — I'll paste my current knowledge.md and describe a change.
+   Return the updated file ready to commit.
+
+2. REFINE-TONE — I'll paste my system prompt and describe a voice change.
+   Rewrite only the rules section, keep the four-phase arc intact.
+
+3. ADD-QUALIFYING-RULE — I'll describe a new lead-scoring or disqualifying
+   rule. Show me the system-prompt edit ready to drop in.
+
+4. AUDIT — When I paste my daily audit report, summarize what's healthy,
+   what's anomalous, and what I should act on.
+
+5. RESEARCH — When I ask, research my niche / competitors / current
+   landscape and propose KB additions with sources.
+
+Confirm you're ready, then wait for me to bring you the first task.`;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="rounded-lg border border-sand bg-sand/40 p-4 text-sm text-charcoal">
         <strong className="text-ink">You own everything.</strong> Your data
         never touches us. Your conversations live in your Vercel project. Your
         API costs go to your Anthropic account. Cancel us tomorrow and the bot
         keeps running on your stack.
       </div>
-      <p className="text-sm text-charcoal">
-        Check off each account. If you don't have one, the link opens its
-        signup. Everything below is free or pay-as-you-go.
-      </p>
-      <ul className="space-y-3">
-        {accounts.map((a) => (
-          <li
-            key={a.name}
-            className="rounded-md border border-sand p-3 text-sm"
-          >
-            <div className="flex justify-between items-center">
-              <span className="font-semibold text-ink">{a.name}</span>
-              <a
-                href={a.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-rust text-xs font-semibold hover:underline"
-              >
-                Open ↗
-              </a>
-            </div>
-            <p className="mt-1 text-charcoal text-xs">{a.why}</p>
-          </li>
-        ))}
-      </ul>
+
+      {/* Accounts */}
+      <div>
+        <h3 className="font-semibold text-ink text-sm mb-2">A. Accounts</h3>
+        <ul className="space-y-2">
+          {accounts.map((a) => (
+            <li
+              key={a.name}
+              className="rounded-md border border-sand p-3 text-sm"
+            >
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-ink">{a.name}</span>
+                <a
+                  href={a.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-rust text-xs font-semibold hover:underline"
+                >
+                  Open ↗
+                </a>
+              </div>
+              <p className="mt-1 text-charcoal text-xs">{a.why}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Tech stack */}
+      <div>
+        <h3 className="font-semibold text-ink text-sm mb-2">
+          B. Tech stack on your machine
+        </h3>
+        <ul className="space-y-2">
+          {stackChecks.map((s) => (
+            <li
+              key={s.name}
+              className="rounded-md border border-sand p-3 text-sm"
+            >
+              <div className="font-semibold text-ink">{s.name}</div>
+              <code className="text-xs text-charcoal">{s.how}</code>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Skills */}
+      <div>
+        <h3 className="font-semibold text-ink text-sm mb-2">
+          C. Recommended Claude Code Skills (have these available)
+        </h3>
+        <ul className="space-y-2">
+          {recommendedSkills.map((s) => (
+            <li
+              key={s.name}
+              className="rounded-md border border-sand p-3 text-sm"
+            >
+              <code className="font-semibold text-rust">/{s.name}</code>
+              <span className="text-charcoal text-xs ml-2">{s.why}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-steel mt-2">
+          The Skills bundled with your installed bot (
+          <code>update-kb</code>, <code>refine-tone</code>,{" "}
+          <code>self-audit</code>, <code>live-fire-test</code>,{" "}
+          <code>research-niche</code>, <code>lessons-learned</code>) ship in
+          your repo automatically — you don&apos;t need to install those
+          separately.
+        </p>
+      </div>
+
+      {/* Bootstrap prompt */}
+      <div>
+        <h3 className="font-semibold text-ink text-sm mb-2">
+          D. Prime your Claude Max conversation
+        </h3>
+        <p className="text-xs text-charcoal mb-2">
+          Open a new chat in Claude Max and paste this. It tells your Claude
+          what we&apos;re installing and what workflows to be ready for. Then
+          come back here.
+        </p>
+        <pre className="bg-ink text-cream rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap">
+{bootstrapPrompt}
+        </pre>
+        <button
+          onClick={() => navigator.clipboard.writeText(bootstrapPrompt)}
+          className="mt-2 text-xs font-semibold text-rust hover:underline"
+        >
+          Copy bootstrap prompt
+        </button>
+      </div>
+
       <button
         onClick={onContinue}
         className="mt-4 rounded-md bg-rust px-5 py-2.5 text-sm font-semibold text-cream hover:bg-rust-dark"
       >
-        I've got all five — continue
+        Everything ready — continue
       </button>
     </div>
   );
