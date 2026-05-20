@@ -1,36 +1,161 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Barndo-Marketing — Customer-Owned Conversion Bot
 
-## Getting Started
+A complete, customer-owned chatbot platform packaged as a forkable template.
+A customer walks through an 8-step install wizard and ends up with their
+own conversion-qualifying chatbot deployed on their stack (their Vercel,
+their Anthropic API key, their data), maintained by their Claude Max
+through a bundle of skills and self-running improvement routines.
 
-First, run the development server:
+This repo is both the **template** customers fork to deploy AND the
+reference implementation for the original niche (barndominium lead-gen
+in TX/TN/OK/LA).
+
+---
+
+## What ships in this template
+
+| Layer | What | Where |
+|---|---|---|
+| **Live website** | Hub + 4 state landing pages + multi-step qualification form + thank-you + how-it-works + privacy/terms | `app/` |
+| **Streaming AI concierge** | Discovery-led chat widget with prompt-cached system prompt, A/B variant support, four-phase conversation arc | `app/api/chat/route.ts` + `lib/concierge.ts` + `components/ConciergeWidget.tsx` |
+| **Lead pipeline** | `/api/lead` scores + writes to Notion + sends Resend instant alert | `app/api/lead/` + `lib/scoring.ts` + `lib/notion.ts` + `lib/email.ts` |
+| **Eval harness** | 18 personas × 6-criterion judge, supports `--variant=A | B | both` | `scripts/evals/` |
+| **9 Skills** | Workflows the customer's Claude Max runs to maintain the bot | `skills/` |
+| **5 Routines** | Scheduled cron jobs on the customer's Anthropic account | `routines/` |
+| **Install wizard** | Customer-facing 8-step setup | `app/install-wizard/` |
+| **Adjacent verticals** | Gift-pyramid capital-campaign planner (demo of vertical reuse) | `app/gift-pyramid/` |
+
+## Quick start (dev)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local       # then fill in keys
+npm run dev                      # site at http://localhost:3000
+npm run build                    # production check
+npm run evals                    # conversation evals against current prompt
+npm run evals -- --variant=both  # side-by-side A vs B with winner recommendation
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Required environment variables
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+See `.env.example`. Minimum to deploy: just `BATCH_SECRET`. Everything
+else gates features that stay off (gracefully) until the key arrives.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Var | What it unlocks |
+|---|---|
+| `ANTHROPIC_API_KEY` | The concierge chatbot + Message Batches lead assessment + evals |
+| `NOTION_TOKEN` + `NOTION_LEADS_DB_ID` | Persisting leads to Notion (the daily CEO routine reads from here) |
+| `RESEND_API_KEY` + `LEAD_ALERT_FROM/TO` | Instant lead-alert emails |
+| `BATCH_SECRET` | Protects `/api/batch/*` (required) |
 
-## Learn More
+## The product architecture
 
-To learn more about Next.js, take a look at the following resources:
+```
+                ┌──────────────────────────────────────────┐
+                │ CUSTOMER OWNS EVERYTHING                  │
+                │ Their Claude Max, API key, Vercel,        │
+                │ Replit, GitHub, data                       │
+                └──────────────────────────────────────────┘
+                       │
+                       │ fork template (this repo)
+                       ▼
+        ┌──────────────────────────────────────────┐
+        │ THE DEPLOYED BOT                          │
+        │ - /widget (chat UI)                       │
+        │ - /api/chat (Sonnet 4.6, prompt-cached)   │
+        │ - /api/lead (score → customer webhook)    │
+        │ - A/B variant cookie (proxy.ts)           │
+        └──────────────────────────────────────────┘
+                       │
+                       ├─→ /skills/ (maintenance workflows)
+                       ├─→ /routines/ (scheduled crons)
+                       ├─→ /scripts/evals/ (regression test)
+                       └─→ /lib/lessons-learned.md (institutional memory)
+                       
+                       │ feedback loop:
+                       │
+        real conversation → daily-improvement → mining →
+        new persona → fix → live-fire-test passes →
+        ab-test-prompt verifies on real traffic →
+        promoted → smarter bot → back to top
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+See [`CLAUDE.md`](./CLAUDE.md) for the full architecture, design rationale,
+and per-component spec.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## The 9 Skills (read [skills/README.md](./skills/README.md))
 
-## Deploy on Vercel
+**On-demand** (customer's Claude Max runs these from a paste-ready template):
+- `update-kb` — add/edit `lib/knowledge.md` without breaking structure
+- `refine-tone` — rewrite the bot's voice (never touches KB or phase arc)
+- `add-qualifying-rule` — keep `scoring.ts` and the system prompt in sync
+- `ab-test-prompt` — safely test prompt changes as variant B vs production A
+- `mine-transcripts-to-personas` — turn real failures into durable eval personas
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+**Scheduled + on-demand**:
+- `self-audit` (daily) — health card, anomaly detection
+- `lessons-learned` (daily) — diagnose failures, propose fixes, log to `lib/lessons-learned.md`
+- `research-niche` (weekly) — research the customer's vertical, propose KB additions
+- `live-fire-test` (monthly) — run the eval suite, surface regressions
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## The 5 Routines (read [routines/README.md](./routines/README.md))
+
+Provisioned on the customer's Anthropic account via the RemoteTrigger API.
+None auto-commit changes. All email the owner with proposed edits + the
+exact file changes, which the owner approves via the matching Skill
+template in Claude Max.
+
+| Routine | Cron | Skill it runs |
+|---|---|---|
+| `daily-audit.json` | Daily 12 UTC | `self-audit` |
+| `daily-improvement.json` | Daily 13 UTC | `lessons-learned` + `mine-transcripts-to-personas` (clusters of 3+) |
+| `weekly-research.json` | Mon 14 UTC | `research-niche` |
+| `weekly-ab-evaluator.json` | Mon 16 UTC | `ab-test-prompt` Phase 3 (skips if no active experiment) |
+| `monthly-eval.json` | 1st 15 UTC | `live-fire-test` against both variants |
+
+Cost: roughly **$18–59/month** for all five routines on the customer's
+Anthropic bill, on top of live bot runtime.
+
+## The install wizard
+
+`/install-wizard` is the customer-facing onboarding. Eight steps,
+client-side state in `localStorage`, never sends data to our servers:
+
+1. **Account prep** — Claude Max, Anthropic key, Vercel, Replit, GitHub + tech-stack checks + bootstrap prompt for the customer's Claude
+2. **API key** — pasted, stored client-side only
+3. **Brand** — scans the customer's existing site (`/api/wizard/scan-brand`) to pre-fill colors, logo, tagline; manual overrides available
+4. **Knowledge base** — paste SOPs/FAQs/docs; gets restructured into `knowledge.md`
+5. **Qualifying criteria + webhook** — defines lead destination + qualifying signals
+6. **Fork + deploy** — Replit template → Vercel via env vars
+7. **Live-fire test** — runs the eval suite against the configured bot
+8. **Install + ongoing playbook** — script tag + paste-ready Claude Max templates
+
+## How the bot stays good over time
+
+The five scheduled routines + nine skills compose into a closed loop:
+
+1. Real conversations land in the bot
+2. Daily improvement routine clusters failures
+3. Mining skill turns clusters of 3+ into new eval personas
+4. Owner applies the proposed fix
+5. Live-fire test confirms the fix passes the new persona + no regression
+6. For non-trivial changes, ab-test-prompt runs B vs A on real traffic
+7. Weekly evaluator recommends promote/revert
+8. The eval persona library, the lessons-learned log, and the prompt all
+   ratchet up over time. The bot's regression test becomes the record
+   of every weird visitor it has ever encountered.
+
+## Project status
+
+| Status | What |
+|---|---|
+| ✅ Live | Hub, state pages, qualify form, concierge, lead pipeline, eval harness, 9 skills, 5 routines, A/B infrastructure, brand scanner, install wizard scaffold |
+| 🔄 In progress | Polish on wizard Steps 4/7/8, Replit template repo, single-file Claude.ai artifact extraction |
+| 📋 Future | Per-tenant deployment of the bot (current model is fork-and-deploy per customer) |
+
+## License + ownership
+
+Each customer who installs from this template owns their resulting
+deployment fully — their Vercel, their Anthropic costs, their data,
+their decisions. This template repo is the source we ship from; what
+they fork is theirs.

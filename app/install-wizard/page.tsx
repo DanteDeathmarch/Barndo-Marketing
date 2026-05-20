@@ -625,10 +625,18 @@ function StepKnowledge({
         rows={10}
         className="w-full rounded-md border border-sand bg-cream px-3 py-2 text-sm font-mono"
       />
-      <div className="rounded-md bg-sand/40 p-3 text-xs text-charcoal">
-        <strong>Next iteration:</strong> a &quot;Restructure with Claude&quot;
-        button here will use your Anthropic key to clean the raw paste into a
-        well-organized <code>knowledge.md</code> automatically.
+      <div className="rounded-md bg-sand/40 p-3 text-xs text-charcoal space-y-2">
+        <p>
+          <strong>After this step:</strong> open your Claude Max (the one you
+          primed in step 1) and paste your <code>update-kb</code> Skill
+          template along with the raw text you entered here. Claude restructures
+          it into a clean <code>knowledge.md</code> ready to commit to your
+          forked repo.
+        </p>
+        <p>
+          See <code>skills/update-kb/SKILL.md</code> in your repo for the exact
+          template wording.
+        </p>
       </div>
       {ready && (
         <button
@@ -651,6 +659,39 @@ function StepQualifying({
   update: <K extends keyof WizardState>(k: K, v: WizardState[K]) => void;
   onContinue: () => void;
 }) {
+  const [webhookState, setWebhookState] = useState<
+    "idle" | "testing" | "ok" | "fail"
+  >("idle");
+  const [webhookMsg, setWebhookMsg] = useState("");
+
+  async function testWebhook() {
+    if (!state.webhookUrl.trim()) return;
+    setWebhookState("testing");
+    setWebhookMsg("");
+    try {
+      const res = await fetch("/api/wizard/test-webhook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: state.webhookUrl }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setWebhookState("ok");
+        setWebhookMsg(
+          `✓ ${data.status} in ${data.elapsedMs}ms — your CRM accepted the sample payload.`
+        );
+      } else {
+        setWebhookState("fail");
+        setWebhookMsg(
+          `${data.status ? `${data.status} — ` : ""}${data.error ?? data.hint ?? "Failed"}`
+        );
+      }
+    } catch (err) {
+      setWebhookState("fail");
+      setWebhookMsg(err instanceof Error ? err.message : "request failed");
+    }
+  }
+
   const ready =
     state.qualifyingGoal.trim().length > 5 &&
     state.qualifyingSignals.trim().length > 5;
@@ -696,18 +737,39 @@ function StepQualifying({
         <span className="block font-semibold text-ink mb-1">
           Lead webhook URL (where qualified leads POST to)
         </span>
-        <input
-          type="url"
-          value={state.webhookUrl}
-          onChange={(e) => update("webhookUrl", e.target.value)}
-          placeholder="https://your-crm.com/api/leads OR Zapier / Make webhook"
-          className="w-full rounded-md border border-sand bg-cream px-3 py-2 text-sm font-mono"
-        />
+        <div className="flex gap-2">
+          <input
+            type="url"
+            value={state.webhookUrl}
+            onChange={(e) => {
+              update("webhookUrl", e.target.value);
+              setWebhookState("idle");
+            }}
+            placeholder="https://your-crm.com/api/leads OR Zapier / Make webhook"
+            className="flex-1 rounded-md border border-sand bg-cream px-3 py-2 text-sm font-mono"
+          />
+          <button
+            type="button"
+            onClick={testWebhook}
+            disabled={!state.webhookUrl.trim() || webhookState === "testing"}
+            className="rounded-md bg-rust px-4 py-2 text-sm font-semibold text-cream hover:bg-rust-dark disabled:opacity-50"
+          >
+            {webhookState === "testing" ? "Testing…" : "Test"}
+          </button>
+        </div>
       </label>
-      <div className="rounded-md bg-sand/40 p-3 text-xs text-charcoal">
-        <strong>Next iteration:</strong> a &quot;Test webhook&quot; button that
-        POSTs a sample lead payload so you confirm the URL works before deploy.
-      </div>
+      {webhookState !== "idle" && webhookMsg && (
+        <div
+          className={
+            "rounded-md p-3 text-xs " +
+            (webhookState === "ok"
+              ? "bg-pine/10 border border-pine/40 text-pine"
+              : "bg-rust/10 border border-rust/40 text-rust")
+          }
+        >
+          {webhookMsg}
+        </div>
+      )}
       {ready && (
         <button
           onClick={onContinue}
@@ -729,52 +791,140 @@ function StepDeploy({
   update: <K extends keyof WizardState>(k: K, v: WizardState[K]) => void;
   onContinue: () => void;
 }) {
+  const TEMPLATE_REPO =
+    "https://github.com/DanteDeathmarch/Barndo-Marketing";
   const ready = state.vercelProjectName.trim().length > 2;
+
+  const envVars = `ANTHROPIC_API_KEY=${state.anthropicKey ? "<paste your key from step 2>" : "(set in step 2 first)"}
+LEAD_WEBHOOK_URL=${state.webhookUrl || "(set in step 5 first)"}
+BRAND_COLOR=${state.brandColor}
+BRAND_LOGO_URL=${state.logoUrl || ""}
+TONE_WORDS=${state.toneWords}
+FORMALITY=${state.formality}
+BUSINESS_NAME=${state.vercelProjectName || "your-business"}`;
+
   return (
-    <div className="space-y-4">
-      <ol className="list-decimal list-inside text-sm text-charcoal space-y-2">
-        <li>
-          Fork the template Replit:{" "}
-          <span className="font-mono text-xs">[link added in next iteration]</span>
-        </li>
-        <li>
-          In Replit → Tools → <strong>Deploy to Vercel</strong> → sign in with your
-          Vercel account
-        </li>
-        <li>Name the project (below) and paste the env vars we generated</li>
-        <li>Click Deploy</li>
-      </ol>
+    <div className="space-y-5">
+      {/* Path A: Vercel direct from GitHub */}
+      <div className="rounded-md border border-sand p-4">
+        <p className="font-semibold text-ink text-sm mb-2">
+          Path A — Fork to your GitHub, import to your Vercel (recommended)
+        </p>
+        <ol className="list-decimal list-inside text-sm text-charcoal space-y-1.5">
+          <li>
+            Open{" "}
+            <a
+              href={TEMPLATE_REPO}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-rust font-semibold hover:underline"
+            >
+              the template repo
+            </a>{" "}
+            and click <strong>Fork</strong> — fork into your GitHub account
+          </li>
+          <li>
+            Go to{" "}
+            <a
+              href="https://vercel.com/new"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-rust font-semibold hover:underline"
+            >
+              vercel.com/new
+            </a>{" "}
+            → <strong>Import</strong> next to your forked repo
+          </li>
+          <li>
+            In the Vercel project settings, paste the env vars below into{" "}
+            <strong>Environment Variables</strong>
+          </li>
+          <li>
+            Click <strong>Deploy</strong> — first build takes ~2 minutes
+          </li>
+        </ol>
+      </div>
+
+      {/* Path B: Replit */}
+      <div className="rounded-md border border-sand p-4">
+        <p className="font-semibold text-ink text-sm mb-2">
+          Path B — Replit (if you want an in-browser editor)
+        </p>
+        <ol className="list-decimal list-inside text-sm text-charcoal space-y-1.5">
+          <li>
+            Sign in to{" "}
+            <a
+              href="https://replit.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-rust font-semibold hover:underline"
+            >
+              replit.com
+            </a>{" "}
+            → <strong>Import from GitHub</strong>
+          </li>
+          <li>
+            Paste{" "}
+            <code className="text-xs bg-sand/60 px-1 rounded">
+              {TEMPLATE_REPO}
+            </code>{" "}
+            and choose your fork (Replit will offer to clone it for you)
+          </li>
+          <li>
+            Add your env vars to the Replit <strong>Secrets</strong> pane
+          </li>
+          <li>
+            Hit <strong>Run</strong>. To go live, click{" "}
+            <strong>Deploy → Connect Vercel</strong> from inside Replit
+          </li>
+        </ol>
+        <p className="mt-2 text-xs text-steel">
+          Tip: Replit also gives you a one-click way to run{" "}
+          <code>npm run evals</code> in the background on a schedule —
+          handy for monthly regression testing without burning your laptop.
+        </p>
+      </div>
+
       <label className="text-sm block">
         <span className="block font-semibold text-ink mb-1">
-          Vercel project name
+          Vercel project name (lowercase, no spaces)
         </span>
         <input
           type="text"
           value={state.vercelProjectName}
-          onChange={(e) => update("vercelProjectName", e.target.value)}
+          onChange={(e) =>
+            update(
+              "vercelProjectName",
+              e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-")
+            )
+          }
           placeholder="groundwork-bot"
           className="w-full rounded-md border border-sand bg-cream px-3 py-2 text-sm font-mono"
         />
       </label>
-      <details className="rounded-md border border-sand p-3 text-sm">
-        <summary className="cursor-pointer font-semibold text-ink">
-          Env vars to paste in Vercel
-        </summary>
-        <pre className="mt-2 text-xs bg-ink text-cream rounded p-3 overflow-x-auto">
-{`ANTHROPIC_API_KEY=${state.anthropicKey ? "(your key from step 2)" : "(set in step 2)"}
-LEAD_WEBHOOK_URL=${state.webhookUrl || "(set in step 5)"}
-BRAND_COLOR=${state.brandColor}
-BRAND_LOGO_URL=${state.logoUrl || ""}
-TONE_WORDS=${state.toneWords}
-FORMALITY=${state.formality}`}
+
+      <div className="rounded-md border border-sand">
+        <div className="flex items-center justify-between p-3 border-b border-sand">
+          <p className="font-semibold text-ink text-sm">Env vars for Vercel</p>
+          <button
+            type="button"
+            onClick={() => navigator.clipboard.writeText(envVars)}
+            className="text-xs font-semibold text-rust hover:underline"
+          >
+            Copy all
+          </button>
+        </div>
+        <pre className="text-xs bg-ink text-cream rounded-b-md p-3 overflow-x-auto">
+{envVars}
         </pre>
-      </details>
+      </div>
+
       {ready && (
         <button
           onClick={onContinue}
           className="rounded-md bg-rust px-5 py-2.5 text-sm font-semibold text-cream hover:bg-rust-dark"
         >
-          Deploy live — continue to test
+          Deployed — continue to test
         </button>
       )}
     </div>
@@ -783,24 +933,66 @@ FORMALITY=${state.formality}`}
 
 function StepTest({ onContinue }: { onContinue: () => void }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <p className="text-sm text-charcoal">
-        Talk to your live bot here, plus three auto-run personas (an ideal
-        customer, an edge case, and a hostile skeptic). Catch weird answers
-        before any real visitor sees them.
+        Test your live bot against 18 synthetic personas before any real
+        visitor sees it. Catches regressions, weird answers, persona-specific
+        failures. The same harness re-runs monthly to catch drift.
       </p>
-      <div className="rounded-md border border-dashed border-sand p-6 text-center text-steel text-sm">
-        Live-fire test interface — coming in next iteration.
-        <br />
-        <br />
-        This will reuse the eval harness in <code>scripts/evals/</code> with a
-        smaller persona set tailored to YOUR qualifying criteria.
+
+      <div className="rounded-md border border-sand p-4 text-sm space-y-3">
+        <p className="font-semibold text-ink">
+          Quick test (in your forked repo, locally or in Replit)
+        </p>
+        <pre className="bg-ink text-cream rounded p-3 text-xs overflow-x-auto">
+{`npm install
+echo 'ANTHROPIC_API_KEY=<your key>' > .env.local
+npm run evals                       # variant A only
+npm run evals -- --variant=both     # A vs B side-by-side`}
+        </pre>
+        <p className="text-xs text-charcoal">
+          The eval report writes to <code>evals-reports/</code> with aggregate
+          scores per criterion, the top failure modes, and proposed prompt
+          edits. Aim for overall <strong>≥ 4.2/5</strong> before going live.
+        </p>
       </div>
+
+      <div className="rounded-md border border-sand p-4 text-sm space-y-2">
+        <p className="font-semibold text-ink">
+          What gets tested (18 personas)
+        </p>
+        <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-charcoal">
+          <li>• ready-tx (ideal buyer)</li>
+          <li>• tire-kicker</li>
+          <li>• wrong-state-ca</li>
+          <li>• hostile-skeptic</li>
+          <li>• terse-texter</li>
+          <li>• vague-dreamer</li>
+          <li>• financing-anxious</li>
+          <li>• kit-only-shopper</li>
+          <li>• already-shopping</li>
+          <li>• out-of-budget</li>
+          <li>• multi-gen-family</li>
+          <li>• mobile-brevity</li>
+          <li>• retired-tn</li>
+          <li>• workshop-first-ok</li>
+          <li>• fl-resident-la-build</li>
+          <li>• overqualified-expert</li>
+          <li>• rude-skeptic</li>
+          <li>• time-waster</li>
+        </ul>
+        <p className="text-xs text-steel pt-2">
+          Edit <code>scripts/evals/personas.ts</code> to tune the roster to
+          YOUR niche. The monthly routine auto-mines new personas from real
+          conversation failures over time.
+        </p>
+      </div>
+
       <button
         onClick={onContinue}
         className="rounded-md bg-rust px-5 py-2.5 text-sm font-semibold text-cream hover:bg-rust-dark"
       >
-        Skip for now — continue
+        Tested — continue to install
       </button>
     </div>
   );
