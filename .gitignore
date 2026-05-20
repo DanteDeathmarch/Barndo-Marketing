@@ -37,6 +37,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# eval run artifacts (transcripts can be large; commit specific snapshots manually)
+/evals-reports
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

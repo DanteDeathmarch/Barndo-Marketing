@@ -222,6 +222,45 @@ curl -X POST http://localhost:3000/api/lead -H "Content-Type: application/json" 
 ## Original plan
 
 The full design rationale (site architecture, decision tradeoffs, build phases)
-lives at `C:\Users\greg\.claude\plans\great-site-architecture-batch-get-memoized-shannon.md`.
-Copy that file into this repo as `docs/architecture-plan.md` if you want it
-travelling with the code.
+lives at `C:\Users\greg\.claude\plans\great-site-architecture-batch-get-memoized-shannon.md`
+and is also copied into this repo as `docs/architecture-plan.md`.
+
+---
+
+## 2026-05 Strategic pivot (read this)
+
+The business has been reframed from "BarndoBuilt is a consumer lead-gen brand
+selling leads to CBS" to **chatbot-as-a-product sold to builders**, plus layered
+lead-gen and adjacent niches:
+
+1. **Phase 1 — Product.** Perfect the concierge chatbot, package it as an
+   embed snippet, sell installs to builders. **First install target:
+   Groundwork** (`https://groundwork-draft.vercel.app`).
+2. **Phase 2 — Service.** Layer done-for-you lead-gen on top of the chatbot
+   for installed customers.
+3. **Phase 3 — Adjacent verticals.** Same chatbot, swapped knowledge base,
+   sold to other verticals. Confirmed candidate: a "marketing for builders"
+   B2B arm some customers operate, plus future verticals like nonprofit
+   fundraising tools (gift-pyramid planner, see \`/gift-pyramid\`).
+
+### Architecture decisions for the product phase
+
+- **Install format:** \`<script>\` tag the customer pastes (Intercom-style).
+- **Lead destination:** customer's system only (POST to a webhook they own).
+  We never store their captured leads.
+- **Knowledge base ownership:** we configure v1 from a customer questionnaire,
+  they edit later via an admin UI (TBD).
+
+### Eval-driven prompt iteration
+
+The concierge is now under **conversation eval**. The harness in
+\`scripts/evals/\` simulates 15 visitor personas against the production system
+prompt, judges each conversation against a 6-criterion rubric, and writes a
+dated markdown report.
+
+Run: \`npm run evals\` (requires \`ANTHROPIC_API_KEY\` in \`.env.local\`).
+Cost per full run: ~$1–3. Iterate on \`lib/concierge.ts\`, rerun, compare
+aggregate scores. See \`scripts/evals/README.md\`.
+
+Future Claude sessions: when tuning the chatbot, default to running an eval
+before AND after the change, and include the score delta in the commit message.
