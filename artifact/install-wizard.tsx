@@ -1317,8 +1317,92 @@ Otherwise return STRICT JSON for the new persona, shape:
 function StepInstall({ state }: { state: WizardState }) {
   const project = state.vercelProjectName || "your-project";
   const snippet = `<script async src="https://${project}.vercel.app/widget.js" data-bot-id="${project}"></script>`;
+  const deployedUrl = state.deployedUrl || `https://${project}.vercel.app`;
+
+  const [verifier, setVerifier] = useState<{ smoke: string; voice: string; e2e: string }>({ smoke: "", voice: "", e2e: "" });
+  const [running, setRunning] = useState<string>("");
+
+  async function streamChat(messages: { role: string; content: string }[]): Promise<string> {
+    const res = await fetch(`${deployedUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  }
+
+  async function runSmoke() {
+    setRunning("smoke"); setVerifier((v) => ({ ...v, smoke: "" }));
+    try {
+      const t0 = Date.now();
+      const text = await streamChat([{ role: "user", content: "hi" }]);
+      const ms = Date.now() - t0;
+      setVerifier((v) => ({ ...v, smoke: text.length > 10 ? `✓ ${ms}ms · ${text.length} chars: "${text.slice(0, 80)}…"` : `⚠ short response (${text.length} chars)` }));
+    } catch (err) {
+      setVerifier((v) => ({ ...v, smoke: `⚠ ${err instanceof Error ? err.message : "fetch failed"}` }));
+    } finally { setRunning(""); }
+  }
+
+  async function runVoice() {
+    setRunning("voice"); setVerifier((v) => ({ ...v, voice: "" }));
+    try {
+      const r1 = await streamChat([{ role: "user", content: "tell me about what you do" }]);
+      const r2 = await streamChat([{ role: "user", content: "tell me about what you do" }, { role: "assistant", content: r1 }, { role: "user", content: "what does it cost?" }]);
+      const grade = await askClaude(`Grade these two bot responses on a 1-10 scale. Target voice: ${state.toneWords}, formality ${state.formality}. Rules to check: 1-3 sentences max per turn, one focused question per turn, no invented prices, four-phase arc (open→discovery→vision→bridge).\n\nResponse 1: "${r1}"\n\nResponse 2: "${r2}"\n\nReply with exactly one line: SCORE/10 — one-sentence assessment.`);
+      setVerifier((v) => ({ ...v, voice: grade.trim().slice(0, 200) }));
+    } catch (err) {
+      setVerifier((v) => ({ ...v, voice: `⚠ ${err instanceof Error ? err.message : "fetch failed"}` }));
+    } finally { setRunning(""); }
+  }
+
+  async function runE2E() {
+    setRunning("e2e"); setVerifier((v) => ({ ...v, e2e: "" }));
+    try {
+      // Simulate an ideal-customer 4-turn conversation. Each turn we add the bot's prior response plus a realistic next message.
+      const turns: { role: string; content: string }[] = [];
+      const ideal = ["hi, im looking to qualify for what you offer", "yes ready to move forward, what do you need from me?", "sure, my budget is in the range you mentioned and timeline is soon", "yes please send me to the next step"];
+      let lastBot = "";
+      for (const userMsg of ideal) {
+        turns.push({ role: "user", content: userMsg });
+        lastBot = await streamChat(turns);
+        turns.push({ role: "assistant", content: lastBot });
+      }
+      const bridged = /qualify|form|book|schedule|next step|send you|sign up|contact/i.test(lastBot);
+      setVerifier((v) => ({ ...v, e2e: bridged ? `✓ Bot bridged to next step by turn 4. Final reply: "${lastBot.slice(0, 120)}…"` : `⚠ Bot didn't reach a clear CTA by turn 4. Final reply: "${lastBot.slice(0, 120)}…"` }));
+    } catch (err) {
+      setVerifier((v) => ({ ...v, e2e: `⚠ ${err instanceof Error ? err.message : "fetch failed"}` }));
+    } finally { setRunning(""); }
+  }
+
   return (
     <div className="space-y-5">
+      {/* Verify the deployed bot — the audit layer that proves the live deployment matches the pre-deploy eval */}
+      <div className="rounded-md border-2 border-amber-300 bg-amber-50 p-4 space-y-3">
+        <p className="font-semibold text-sm">Verify your live bot before going public</p>
+        <p className="text-xs text-stone-700">
+          The Step 7 eval tested your synthesized configuration. These three probes hit the actual deployed <code>/api/chat</code> endpoint at <code className="break-all">{deployedUrl}</code> and confirm the running deployment matches what the eval said.
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          <button type="button" onClick={runSmoke} disabled={!!running} className="rounded-md bg-amber-700 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-800 disabled:opacity-50">
+            {running === "smoke" ? "Pinging…" : "1. Smoke test"}
+          </button>
+          <button type="button" onClick={runVoice} disabled={!!running} className="rounded-md bg-amber-700 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-800 disabled:opacity-50">
+            {running === "voice" ? "Grading…" : "2. Voice match"}
+          </button>
+          <button type="button" onClick={runE2E} disabled={!!running} className="rounded-md bg-amber-700 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-800 disabled:opacity-50">
+            {running === "e2e" ? "Running…" : "3. E2E qualifying"}
+          </button>
+        </div>
+        {verifier.smoke && <p className="text-xs">Smoke: {verifier.smoke}</p>}
+        {verifier.voice && <p className="text-xs">Voice: {verifier.voice}</p>}
+        {verifier.e2e && <p className="text-xs">E2E: {verifier.e2e}</p>}
+        <p className="text-xs text-stone-600">
+          Manual sandbox: open <a href={`${deployedUrl}/test`} target="_blank" rel="noopener noreferrer" className="text-red-800 font-semibold hover:underline">{deployedUrl}/test</a> to chat with the bot directly.
+        </p>
+      </div>
+
       <div>
         <p className="font-semibold text-sm mb-1">Paste this on your website:</p>
         <pre className="bg-stone-900 text-stone-50 rounded p-3 text-xs overflow-x-auto">{snippet}</pre>

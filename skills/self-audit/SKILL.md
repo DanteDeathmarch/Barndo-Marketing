@@ -12,6 +12,25 @@ means and produces an actionable status card. It runs as both:
 - A **scheduled routine** (see `routines/daily-audit.json`) that runs
   automatically on the customer's Anthropic account and emails the owner
 
+## Live conversation probe (the audit layer most monitoring misses)
+
+In addition to webhook/log checks, the audit now actually **has a
+conversation with the bot** via its deployed `/api/chat` endpoint. Three
+fixed turns, scored on:
+
+- Response under 5s
+- 1-3 sentences per turn
+- Ends with a focused question
+- No invented prices/guarantees
+- Reaches a vision statement / bridge by turn 3 for an ideal-customer
+  prompt
+
+If any check fails, the audit goes yellow (not red — a single noisy run
+isn't a failure). Three consecutive yellows escalate to red.
+
+This is what catches "the deploy worked but the bot lost its voice"
+which webhook health checks can't see.
+
 ## When to use it on demand
 
 - A lead didn't show up where it should have
