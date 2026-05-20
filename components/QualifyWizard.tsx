@@ -90,11 +90,15 @@ export default function QualifyWizard({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  // One-time hydration from localStorage. Restores any partial progress
+  // from a prior session. The eslint-disable below is intentional — this
+  // is the documented pattern for hydrating client-only persisted state.
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as Partial<FormState>;
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setForm((f) => ({ ...f, ...parsed, state: initialState || (parsed.state ?? "") }));
       }
     } catch {

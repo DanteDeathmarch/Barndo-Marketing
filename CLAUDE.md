@@ -248,8 +248,10 @@ lead-gen and adjacent niches:
 - **Install format:** \`<script>\` tag the customer pastes (Intercom-style).
 - **Lead destination:** customer's system only (POST to a webhook they own).
   We never store their captured leads.
-- **Knowledge base ownership:** we configure v1 from a customer questionnaire,
-  they edit later via an admin UI (TBD).
+- **Knowledge base ownership:** we configure v1 from the wizard intake, and
+  they edit \`lib/knowledge.md\` directly in their forked repo using the
+  \`update-kb\` skill template in their Claude Max. No admin UI needed — git
+  is the audit trail.
 
 ### Eval-driven prompt iteration
 

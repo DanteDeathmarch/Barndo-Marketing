@@ -14,7 +14,7 @@
 // a single self-contained React file that pastes directly into Claude.ai
 // as a published artifact.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   STEPS,
   STORAGE_KEY,
@@ -27,11 +27,16 @@ export default function InstallWizardPage() {
   const [state, setState] = useState<WizardState>(INITIAL_STATE);
   const [loaded, setLoaded] = useState(false);
 
-  // Restore from localStorage
+  // One-time hydration from localStorage on mount. This is the documented
+  // pattern for restoring user-owned client state when the route is fully
+  // static and there's no server snapshot to hydrate from.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setState({ ...INITIAL_STATE, ...JSON.parse(raw) });
+      if (raw) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setState({ ...INITIAL_STATE, ...JSON.parse(raw) });
+      }
     } catch {
       /* ignore */
     }
@@ -1035,7 +1040,7 @@ Please give me the updated knowledge.md ready to commit.`}
         </details>
         <details className="mb-2">
           <summary className="cursor-pointer text-charcoal">
-            Template: refine the bot's tone
+            Template: refine the bot&apos;s tone
           </summary>
           <pre className="mt-2 bg-cream border border-sand rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap">
 {`I want to refine my bot's voice. Here's the current system prompt:
