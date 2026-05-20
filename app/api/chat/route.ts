@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { CONCIERGE_SYSTEM } from "@/lib/concierge";
+import { cookies } from "next/headers";
+import { getConciergeSystem, type PromptVariant } from "@/lib/concierge";
 
 export const runtime = "nodejs";
 
@@ -31,6 +32,11 @@ export async function POST(req: Request) {
     return new Response("No messages", { status: 400 });
   }
 
+  // A/B variant — proxy.ts sets the bb_variant cookie on first visit.
+  const variantCookie = (await cookies()).get("bb_variant")?.value;
+  const variant: PromptVariant = variantCookie === "B" ? "B" : "A";
+  const systemPrompt = getConciergeSystem(variant);
+
   const anthropic = new Anthropic({ apiKey });
 
   const stream = new ReadableStream<Uint8Array>({
@@ -43,11 +49,12 @@ export async function POST(req: Request) {
           system: [
             {
               type: "text",
-              text: CONCIERGE_SYSTEM,
+              text: systemPrompt,
               cache_control: { type: "ephemeral" },
             },
           ],
           messages: trimmed,
+          metadata: { user_id: `variant_${variant}` },
         });
 
         claudeStream.on("text", (text) => {
@@ -70,6 +77,7 @@ export async function POST(req: Request) {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store",
+      "x-bot-variant": variant,
     },
   });
 }

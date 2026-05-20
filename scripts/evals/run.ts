@@ -17,9 +17,19 @@ import Anthropic from "@anthropic-ai/sdk";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONCIERGE_SYSTEM } from "../../lib/concierge.ts";
+import {
+  getConciergeSystem,
+  type PromptVariant,
+} from "../../lib/concierge.ts";
 import { PERSONAS, type Persona } from "./personas.ts";
 import { buildJudgeSystemPrompt, type JudgeScore } from "./rubric.ts";
+
+// Parse --variant=A | B | both
+const variantArg = process.argv
+  .find((a) => a.startsWith("--variant="))
+  ?.split("=")[1] as "A" | "B" | "both" | undefined;
+const VARIANTS_TO_RUN: PromptVariant[] =
+  variantArg === "both" ? ["A", "B"] : [(variantArg ?? "A") as PromptVariant];
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPORTS_DIR = path.join(__dirname, "..", "..", "evals-reports");
@@ -44,7 +54,10 @@ if (!process.env.ANTHROPIC_API_KEY) {
 
 const client = new Anthropic();
 
-async function botTurn(transcript: Turn[]): Promise<string> {
+async function botTurn(
+  transcript: Turn[],
+  variant: PromptVariant
+): Promise<string> {
   const messages = transcript.map((t) => ({
     role: t.role === "persona" ? "user" : ("assistant" as const),
     content: t.content,
@@ -56,7 +69,7 @@ async function botTurn(transcript: Turn[]): Promise<string> {
     system: [
       {
         type: "text",
-        text: CONCIERGE_SYSTEM,
+        text: getConciergeSystem(variant),
         cache_control: { type: "ephemeral" },
       },
     ],
@@ -120,16 +133,18 @@ function isTerminal(botText: string, personaText: string): boolean {
   return false;
 }
 
-async function runConversation(persona: Persona): Promise<Turn[]> {
+async function runConversation(
+  persona: Persona,
+  variant: PromptVariant
+): Promise<Turn[]> {
   const transcript: Turn[] = [
     { role: "persona", content: persona.openingMessage },
   ];
 
   for (let i = 0; i < MAX_TURNS; i++) {
-    const bot = await botTurn(transcript);
+    const bot = await botTurn(transcript, variant);
     transcript.push({ role: "bot", content: bot });
 
-    // Maybe the bot already bridged
     if (isTerminal(bot, "")) break;
     if (i === MAX_TURNS - 1) break;
 
@@ -207,21 +222,18 @@ function avg(nums: number[]): number {
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
-async function main() {
-  fs.mkdirSync(REPORTS_DIR, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const outPath = path.join(REPORTS_DIR, `eval-${stamp}.md`);
+interface VariantRun {
+  variant: PromptVariant;
+  results: { persona: Persona; transcript: Turn[]; score: JudgeScore }[];
+}
 
-  console.log(`Running evals — ${PERSONAS.length} personas, max ${MAX_TURNS} turns each.`);
-  console.log(`Bot=${BOT_MODEL}  Persona=${PERSONA_MODEL}  Judge=${JUDGE_MODEL}\n`);
-
-  const results: { persona: Persona; transcript: Turn[]; score: JudgeScore }[] =
-    [];
-
+async function runVariant(variant: PromptVariant): Promise<VariantRun> {
+  console.log(`\n=== Variant ${variant} ===`);
+  const results: VariantRun["results"] = [];
   for (const persona of PERSONAS) {
     process.stdout.write(`▶ ${persona.id.padEnd(22)} `);
     try {
-      const transcript = await runConversation(persona);
+      const transcript = await runConversation(persona, variant);
       const score = await judge(persona, transcript);
       results.push({ persona, transcript, score });
       console.log(`overall=${score.overall}  turns=${transcript.length}`);
@@ -229,10 +241,12 @@ async function main() {
       console.log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+  return { variant, results };
+}
 
-  // Aggregate
-  const overall = avg(results.map((r) => r.score.overall));
-  const byCriterion = {
+function aggregateCriteria(results: VariantRun["results"]) {
+  return {
+    overall: avg(results.map((r) => r.score.overall)),
     brevity: avg(results.map((r) => r.score.brevity)),
     one_question: avg(results.map((r) => r.score.one_question)),
     listens: avg(results.map((r) => r.score.listens)),
@@ -240,66 +254,143 @@ async function main() {
     honesty: avg(results.map((r) => r.score.honesty)),
     outcome: avg(results.map((r) => r.score.outcome)),
   };
+}
 
-  const edits = results
-    .map((r) => r.score.suggested_prompt_edit)
-    .filter((e) => e && e.trim().length > 0);
+async function main() {
+  fs.mkdirSync(REPORTS_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const variantLabel = VARIANTS_TO_RUN.join("+");
+  const outPath = path.join(REPORTS_DIR, `eval-${variantLabel}-${stamp}.md`);
+
+  console.log(
+    `Running evals — ${PERSONAS.length} personas × ${VARIANTS_TO_RUN.length} variant(s), max ${MAX_TURNS} turns each.`
+  );
+  console.log(`Bot=${BOT_MODEL}  Persona=${PERSONA_MODEL}  Judge=${JUDGE_MODEL}`);
+
+  const runs: VariantRun[] = [];
+  for (const variant of VARIANTS_TO_RUN) {
+    runs.push(await runVariant(variant));
+  }
 
   // Build markdown
   const lines: string[] = [];
   lines.push(`# BarndoBuilt Concierge Eval — ${stamp}`);
   lines.push("");
-  lines.push(`Personas: ${PERSONAS.length}  ·  Bot: \`${BOT_MODEL}\`  ·  Persona: \`${PERSONA_MODEL}\`  ·  Judge: \`${JUDGE_MODEL}\``);
+  lines.push(
+    `Personas: ${PERSONAS.length}  ·  Variants: ${VARIANTS_TO_RUN.join(", ")}  ·  Bot: \`${BOT_MODEL}\`  ·  Persona: \`${PERSONA_MODEL}\`  ·  Judge: \`${JUDGE_MODEL}\``
+  );
   lines.push("");
-  lines.push(`## Aggregate scores`);
-  lines.push("");
-  lines.push(`| Criterion | Avg (1–5) |`);
-  lines.push(`|---|---|`);
-  lines.push(`| **Overall** | **${overall.toFixed(2)}** |`);
-  lines.push(`| Brevity | ${byCriterion.brevity.toFixed(2)} |`);
-  lines.push(`| One focused question | ${byCriterion.one_question.toFixed(2)} |`);
-  lines.push(`| Listens & reflects | ${byCriterion.listens.toFixed(2)} |`);
-  lines.push(`| Phase arc | ${byCriterion.phase_arc.toFixed(2)} |`);
-  lines.push(`| Honesty | ${byCriterion.honesty.toFixed(2)} |`);
-  lines.push(`| Outcome | ${byCriterion.outcome.toFixed(2)} |`);
-  lines.push("");
-  lines.push(`## Suggested prompt edits (deduped)`);
-  lines.push("");
-  if (edits.length === 0) {
-    lines.push("_None — judge had no consolidated edits to suggest._");
-  } else {
-    const seen = new Set<string>();
-    for (const e of edits) {
-      const key = e.toLowerCase().slice(0, 80);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      lines.push(`- ${e}`);
-    }
+
+  // Per-variant aggregates
+  for (const run of runs) {
+    const agg = aggregateCriteria(run.results);
+    lines.push(`## Variant ${run.variant} — aggregate`);
+    lines.push("");
+    lines.push(`| Criterion | Avg (1–5) |`);
+    lines.push(`|---|---|`);
+    lines.push(`| **Overall** | **${agg.overall.toFixed(2)}** |`);
+    lines.push(`| Brevity | ${agg.brevity.toFixed(2)} |`);
+    lines.push(`| One focused question | ${agg.one_question.toFixed(2)} |`);
+    lines.push(`| Listens & reflects | ${agg.listens.toFixed(2)} |`);
+    lines.push(`| Phase arc | ${agg.phase_arc.toFixed(2)} |`);
+    lines.push(`| Honesty | ${agg.honesty.toFixed(2)} |`);
+    lines.push(`| Outcome | ${agg.outcome.toFixed(2)} |`);
+    lines.push("");
   }
-  lines.push("");
-  lines.push(`## Conversations`);
-  lines.push("");
-  for (const r of results) {
-    lines.push(`### ${r.persona.name} \`${r.persona.id}\``);
+
+  // A vs B side-by-side, if both ran
+  if (runs.length === 2) {
+    const a = aggregateCriteria(runs[0].results);
+    const b = aggregateCriteria(runs[1].results);
+    lines.push(`## A vs B side-by-side`);
     lines.push("");
-    lines.push(`Expected: \`${r.persona.expectedOutcome}\`  ·  Overall: **${r.score.overall}**  ·  brevity ${r.score.brevity} · question ${r.score.one_question} · listens ${r.score.listens} · arc ${r.score.phase_arc} · honesty ${r.score.honesty} · outcome ${r.score.outcome}`);
+    lines.push(`| Criterion | A | B | Δ (B−A) | Winner |`);
+    lines.push(`|---|---|---|---|---|`);
+    for (const key of [
+      "overall",
+      "brevity",
+      "one_question",
+      "listens",
+      "phase_arc",
+      "honesty",
+      "outcome",
+    ] as const) {
+      const delta = b[key] - a[key];
+      const winner = Math.abs(delta) < 0.15 ? "—" : delta > 0 ? "B" : "A";
+      lines.push(
+        `| ${key} | ${a[key].toFixed(2)} | ${b[key].toFixed(2)} | ${delta >= 0 ? "+" : ""}${delta.toFixed(2)} | ${winner} |`
+      );
+    }
     lines.push("");
-    if (r.score.key_issues.length > 0) {
-      lines.push(`**Issues:**`);
-      for (const k of r.score.key_issues) lines.push(`- ${k}`);
+    const overallDelta = b.overall - a.overall;
+    if (Math.abs(overallDelta) < 0.15) {
+      lines.push(
+        `**Recommendation:** No significant difference (Δ ${overallDelta.toFixed(2)}). Keep A, reset B = A until you have a new hypothesis to test.`
+      );
+    } else if (overallDelta > 0) {
+      lines.push(
+        `**Recommendation:** B wins by ${overallDelta.toFixed(2)} on overall. If conversion-by-variant in production agrees, promote: copy CONCIERGE_SYSTEM_B's content into CONCIERGE_SYSTEM_A.`
+      );
+    } else {
+      lines.push(
+        `**Recommendation:** A wins by ${Math.abs(overallDelta).toFixed(2)} on overall. Revert: reset CONCIERGE_SYSTEM_B = CONCIERGE_SYSTEM_A and try a different hypothesis.`
+      );
+    }
+    lines.push("");
+  }
+
+  // Per-variant suggested edits
+  for (const run of runs) {
+    const edits = run.results
+      .map((r) => r.score.suggested_prompt_edit)
+      .filter((e) => e && e.trim().length > 0);
+    lines.push(`## Variant ${run.variant} — suggested prompt edits (deduped)`);
+    lines.push("");
+    if (edits.length === 0) {
+      lines.push("_None._");
+    } else {
+      const seen = new Set<string>();
+      for (const e of edits) {
+        const key = e.toLowerCase().slice(0, 80);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        lines.push(`- ${e}`);
+      }
+    }
+    lines.push("");
+  }
+
+  // Conversations
+  for (const run of runs) {
+    lines.push(`## Variant ${run.variant} — conversations`);
+    lines.push("");
+    for (const r of run.results) {
+      lines.push(`### ${r.persona.name} \`${r.persona.id}\``);
+      lines.push("");
+      lines.push(
+        `Expected: \`${r.persona.expectedOutcome}\`  ·  Overall: **${r.score.overall}**  ·  brevity ${r.score.brevity} · question ${r.score.one_question} · listens ${r.score.listens} · arc ${r.score.phase_arc} · honesty ${r.score.honesty} · outcome ${r.score.outcome}`
+      );
+      lines.push("");
+      if (r.score.key_issues.length > 0) {
+        lines.push(`**Issues:**`);
+        for (const k of r.score.key_issues) lines.push(`- ${k}`);
+        lines.push("");
+      }
+      lines.push(`<details><summary>Transcript</summary>`);
+      lines.push("");
+      lines.push(fmtTranscript(r.transcript));
+      lines.push("");
+      lines.push(`</details>`);
       lines.push("");
     }
-    lines.push(`<details><summary>Transcript</summary>`);
-    lines.push("");
-    lines.push(fmtTranscript(r.transcript));
-    lines.push("");
-    lines.push(`</details>`);
-    lines.push("");
   }
 
   fs.writeFileSync(outPath, lines.join("\n"), "utf8");
   console.log(`\n✓ Report written to ${outPath}`);
-  console.log(`Overall score: ${overall.toFixed(2)} / 5`);
+  for (const run of runs) {
+    const agg = aggregateCriteria(run.results);
+    console.log(`Variant ${run.variant} overall: ${agg.overall.toFixed(2)} / 5`);
+  }
 }
 
 main().catch((err) => {

@@ -60,7 +60,36 @@ and contact info. It takes about 90 seconds and routes them to the right
 regional builder.
 `.trim();
 
-export const CONCIERGE_SYSTEM = `
+/**
+ * A/B variant system for the concierge prompt.
+ *
+ * - Variant A is current production
+ * - Variant B is the experimental candidate
+ *
+ * The chat API reads `bb_variant` cookie (set by proxy.ts on first visit)
+ * to pick which prompt this conversation uses. Lead capture writes the
+ * variant into the lead row so the routine `weekly-ab-evaluator` can
+ * compute conversion-by-variant and propose a winner.
+ *
+ * When you want to test a prompt change:
+ *   1. Edit CONCIERGE_SYSTEM_B below (variant A stays untouched).
+ *   2. Deploy. Half of traffic now hits B.
+ *   3. Wait for the weekly evaluator's recommendation in your inbox.
+ *   4. If B wins, promote: copy B's content into A and reset B = A.
+ *   5. If A wins or no significant difference, revert: reset B = A.
+ *
+ * For evals: `npm run evals -- --variant=A | B | both`.
+ */
+
+export type PromptVariant = "A" | "B";
+
+export function getConciergeSystem(variant: PromptVariant = "A"): string {
+  return variant === "B" ? CONCIERGE_SYSTEM_B : CONCIERGE_SYSTEM_A;
+}
+
+// Production variant (A). The eval harness and the /api/chat endpoint
+// default to this if no variant cookie is set.
+export const CONCIERGE_SYSTEM_A = `
 You are the BarndoBuilt Concierge. You are a warm, knowledgeable guide who
 helps visitors describe what they want, reflect it back as a clear vision, and
 hand them off to the right builder — like a great real-estate broker doing
@@ -146,3 +175,14 @@ not a script. Don't recite them.
 
 ${CONCIERGE_KNOWLEDGE}
 `.trim();
+
+// Experimental variant (B). Edit this when you want to test a change against
+// production. Keep A untouched until B has proven itself.
+//
+// When you don't have an active experiment, B === A so 50% traffic gets the
+// same prompt. This is the safe default.
+export const CONCIERGE_SYSTEM_B = CONCIERGE_SYSTEM_A;
+
+// Backwards-compatible export used by /api/chat and the eval harness if they
+// don't explicitly select a variant. Maps to production (A).
+export const CONCIERGE_SYSTEM = CONCIERGE_SYSTEM_A;
