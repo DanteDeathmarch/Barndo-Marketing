@@ -1,0 +1,29 @@
+{
+  "name": "{{BUSINESS_NAME}}-weekly-research",
+  "cron_expression": "0 14 * * 1",
+  "enabled": true,
+  "job_config": {
+    "ccr": {
+      "environment_id": "{{ENVIRONMENT_ID}}",
+      "session_context": {
+        "model": "claude-sonnet-4-6",
+        "sources": [],
+        "allowed_tools": ["Bash", "Read", "Write", "WebFetch", "WebSearch"]
+      },
+      "events": [
+        {
+          "data": {
+            "uuid": "{{UUID}}",
+            "session_id": "",
+            "type": "user",
+            "parent_tool_use_id": null,
+            "message": {
+              "role": "user",
+              "content": "You are the weekly research routine for the {{BUSINESS_NAME}} chatbot. Today is the current date. Run the research pass defined in skills/research-niche/SKILL.md.\n\nContext:\n- Positioning: {{POSITIONING_ONE_LINER}}\n- Niche/vertical: {{NICHE}}\n- Geographic coverage: {{GEO_COVERAGE}}\n- Known competitors (seed list): {{COMPETITOR_LIST}}\n- Current lib/knowledge.md is in the repo at {{REPO_URL}}\n\nSequence:\n\n1. PULL RECENT QUESTIONS — from the daily-improvement reports of the last 7 days, gather the list of questions/topics where the bot was weak. These are the gaps to research toward.\n\n2. NICHE NEWS — search for major news in {{NICHE}} from the last 7 days. Filter to items the bot's visitors might ask about (regulation, market, pricing, supplier changes).\n\n3. COMPETITOR ACTIVITY — for each named competitor, check their site for changes (new offerings, pricing shifts, positioning updates). Note new entrants if you encounter any.\n\n4. QUESTION EVOLUTION — using web search, check Reddit / forum / search-trend signals for what people in {{NICHE}} are asking about that they weren't 6 months ago.\n\n5. KB GAPS — match the unanswered questions from step 1 to the research from steps 2–4. Where the research provides a credible answer to a known gap, propose a KB addition.\n\n6. WHAT NOT TO ADD — flag any interesting-but-out-of-scope items so the KB stays tight.\n\nEmail the report to {{OWNER_EMAIL}} with subject: '[{{BUSINESS_NAME}}] Weekly research — [date range]'.\n\nReport format:\n\n# Weekly Research — [DATE RANGE]\n\n## TL;DR\n[3 bullets max]\n\n## News / changes worth knowing\n[item] — [why it matters] — [source URL]\n\n## Competitor activity\n[competitor] — [what changed] — [implication]\n\n## New questions our visitors are likely to ask\n[question] — [evidence]\n\n## Proposed KB additions\nFor each: the text to add (a paragraph), the section of knowledge.md it belongs in, the source URL.\n\n## What NOT to add\n[items that look interesting but are out of scope or unverified]\n\nCite sources for EVERY claim. Use ranges, not absolutes, for prices or stats. Do NOT modify lib/knowledge.md directly — the owner reviews proposals and uses the update-kb skill to commit changes."
+            }
+          }
+        }
+      ]
+    }
+  }
+}

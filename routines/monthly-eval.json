@@ -1,0 +1,35 @@
+{
+  "name": "{{BUSINESS_NAME}}-monthly-eval",
+  "cron_expression": "0 15 1 * *",
+  "enabled": true,
+  "job_config": {
+    "ccr": {
+      "environment_id": "{{ENVIRONMENT_ID}}",
+      "session_context": {
+        "model": "claude-sonnet-4-6",
+        "sources": [
+          {
+            "git_repository": {
+              "url": "{{REPO_URL}}"
+            }
+          }
+        ],
+        "allowed_tools": ["Bash", "Read", "Write"]
+      },
+      "events": [
+        {
+          "data": {
+            "uuid": "{{UUID}}",
+            "session_id": "",
+            "type": "user",
+            "parent_tool_use_id": null,
+            "message": {
+              "role": "user",
+              "content": "You are the monthly live-fire test routine for the {{BUSINESS_NAME}} chatbot. Today is the current date. Run the eval suite defined in skills/live-fire-test/SKILL.md and scripts/evals/.\n\nThe repo is cloned into your workspace. You have the codebase available.\n\nSequence:\n\n1. INSTALL & RUN — run `npm install` then `npm run evals`. The runner uses lib/concierge.ts (current production system prompt) as the bot, the personas in scripts/evals/personas.ts as synthetic visitors, and the rubric in scripts/evals/rubric.ts.\n\n2. APPLY ADAPTIVE ITERATION — for each persona, if the judge verdicts are split (variance > 0.5 in overall score across 2 rounds), double the iterations up to 8. Stop when 3 consecutive rounds agree on the verdict.\n\n3. COMPARE TO LAST RUN — find the most recent prior eval report under evals-reports/. Compute deltas in:\n   - Overall aggregate score\n   - Per-criterion scores (brevity, one_question, listens, phase_arc, honesty, outcome)\n   - Per-persona overall\n\n4. IDENTIFY TOP 3 FAILURE MODES — across all persona conversations this run, what are the 3 most-repeated judge issues? For each, propose a one-sentence prompt edit that would address it.\n\n5. RECOMMEND — based on the aggregate score:\n   - If overall ≥ 4.2 AND no criterion below 4.0: ship it / no action needed\n   - Otherwise: name the highest-leverage fix (one specific edit) before the next deploy\n\n6. AUTO-DRAFT LESSONS-LEARNED ENTRIES — for any failure mode that recurred 3+ times across the run, draft a ready-to-append entry for lib/lessons-learned.md.\n\n7. COMMIT THE REPORT — write the markdown report to evals-reports/eval-{timestamp}.md and commit + push it to the repo. (This is the ONLY thing this routine auto-commits — the report itself, not any fix.)\n\nEmail the summary to {{OWNER_EMAIL}} with subject: '[{{BUSINESS_NAME}}] Monthly eval — [date] — overall [score]/5 (Δ [delta])'.\n\nEmail body:\n\n# Monthly eval — [DATE]\n\n**Overall: [score]/5  ([+/- delta] vs last run)**\n\n## Criterion deltas\n| Criterion | This run | Last run | Δ |\n\n## Persona-level shifts\nOnly list personas whose overall changed by ≥0.5.\n\n## Top 3 failure modes\n1. [pattern] — proposed edit: [one sentence] — owner action: paste into the matching Skill template\n2. ...\n\n## Recommendation\n[\"Ship it\" or \"Fix X before next deploy\"]\n\n## Full report\nCommitted at evals-reports/eval-{timestamp}.md ({{REPO_URL}}/blob/main/...)\n\nDo NOT modify lib/concierge.ts or any system prompt. Only propose."
+            }
+          }
+        }
+      ]
+    }
+  }
+}

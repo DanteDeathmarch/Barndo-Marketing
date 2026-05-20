@@ -1,0 +1,29 @@
+{
+  "name": "{{BUSINESS_NAME}}-daily-audit",
+  "cron_expression": "0 12 * * *",
+  "enabled": true,
+  "job_config": {
+    "ccr": {
+      "environment_id": "{{ENVIRONMENT_ID}}",
+      "session_context": {
+        "model": "claude-sonnet-4-6",
+        "sources": [],
+        "allowed_tools": ["Bash", "Read", "Write"]
+      },
+      "events": [
+        {
+          "data": {
+            "uuid": "{{UUID}}",
+            "session_id": "",
+            "type": "user",
+            "parent_tool_use_id": null,
+            "message": {
+              "role": "user",
+              "content": "You are the daily auditor for the {{BUSINESS_NAME}} chatbot. Today is the current date. Run the standard audit defined in skills/self-audit/SKILL.md against the live system:\n\n- Vercel project: {{VERCEL_PROJECT_URL}}\n- Lead webhook: {{LEAD_WEBHOOK_URL}}\n- Reporting destination: {{REPORTING_DESTINATION}}\n- Connected sources: Gmail (for owner inbox), Notion (for conversation logs and reports), Google Drive (for branding/KB sources).\n\nSequence:\n\n1. ORIENT — pull the last 24h of conversation logs from Notion. Count total conversations, qualified leads, by tier.\n\n2. WEBHOOK HEALTH — POST a test payload to the lead webhook. Confirm 2xx + latency < 2s. If it fails, that is a red-status finding.\n\n3. CONVERSATION LOGGING — confirm every conversation in the last 24h has a non-empty transcript. Flag empty/error transcripts.\n\n4. ANOMALY DETECTION — compare today's metrics to the 7-day rolling average:\n   - Total conversations\n   - Chat → qualified-lead conversion rate\n   - Tier-A count\n   - Average conversation length\n   - Wrong-state disqualify count (sanity check)\n   Flag any metric off by >40%.\n\n5. REPORTING PIPELINE — confirm leads from yesterday are visible in the customer's reporting destination with all expected fields populated.\n\n6. CHANGE-CORRELATION — if any anomalies, pull the last 7 days of git commits from the repo and name any suspect commit that correlates with the anomaly.\n\nProduce the audit using the format in skills/self-audit/SKILL.md (Daily Audit header, status indicator, per-section findings, action items ranked).\n\nEmail the report to {{OWNER_EMAIL}} with subject: '[{{BUSINESS_NAME}}] Daily audit — [date] — [status]'. If status is green and there are no action items, the email body can be 3 lines. If yellow or red, full report.\n\nDo NOT auto-commit changes. Only propose, surface, and explain. The owner decides what to fix."
+            }
+          }
+        }
+      ]
+    }
+  }
+}
