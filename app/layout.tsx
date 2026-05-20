@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
-import ConciergeWidget from "@/components/ConciergeWidget";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -11,9 +8,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "BarndoBuilt — Build a Custom Barndominium on Your Land",
+  title: "Conversion Bot — Install Wizard",
   description:
-    "Own land in Texas, Tennessee, Oklahoma, or Louisiana? BarndoBuilt matches you with a vetted builder who handles design through move-in under one contract.",
+    "Customer-owned conversion-qualifying chatbot. Install on your own stack in 8 steps.",
 };
 
 export default function RootLayout({
@@ -23,12 +20,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} h-full`}>
-      <body className="min-h-full flex flex-col bg-cream text-ink">
-        <Header />
-        <main className="flex-1">{children}</main>
-        <Footer />
-        <ConciergeWidget />
-      </body>
+      <body className="min-h-full bg-cream text-ink">{children}</body>
     </html>
   );
 }

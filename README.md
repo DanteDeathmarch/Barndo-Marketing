@@ -1,14 +1,13 @@
 # Barndo-Marketing — Customer-Owned Conversion Bot
 
-A complete, customer-owned chatbot platform packaged as a forkable template.
-A customer walks through an 8-step install wizard and ends up with their
-own conversion-qualifying chatbot deployed on their stack (their Vercel,
-their Anthropic API key, their data), maintained by their Claude Max
-through a bundle of skills and self-running improvement routines.
+A complete, customer-owned chatbot platform packaged as a forkable
+template. A customer walks through the install wizard and ends up with
+their own conversion-qualifying chatbot deployed on their stack (their
+Vercel, their Anthropic API key, their data), maintained by their Claude
+Max through a bundle of skills and self-running improvement routines.
 
-This repo is both the **template** customers fork to deploy AND the
-reference implementation for the original niche (barndominium lead-gen
-in TX/TN/OK/LA).
+The customer embeds the chatbot widget on **their existing website** via
+a `<script>` tag — we don't host their public site.
 
 ---
 
@@ -16,14 +15,13 @@ in TX/TN/OK/LA).
 
 | Layer | What | Where |
 |---|---|---|
-| **Live website** | Hub + 4 state landing pages + multi-step qualification form + thank-you + how-it-works + privacy/terms | `app/` |
-| **Streaming AI concierge** | Discovery-led chat widget with prompt-cached system prompt, A/B variant support, four-phase conversation arc | `app/api/chat/route.ts` + `lib/concierge.ts` + `components/ConciergeWidget.tsx` |
-| **Lead pipeline** | `/api/lead` scores + writes to Notion + sends Resend instant alert | `app/api/lead/` + `lib/scoring.ts` + `lib/notion.ts` + `lib/email.ts` |
+| **Chatbot runtime** | Streaming AI concierge — discovery-led, prompt-cached, A/B variant aware, four-phase conversation arc | `app/api/chat/` + `lib/concierge.ts` + `components/ConciergeWidget.tsx` |
+| **Lead pipeline** | `/api/lead` scores + writes to Notion + sends Resend instant alert + POSTs to customer webhook | `app/api/lead/` + `lib/scoring.ts` + `lib/notion.ts` + `lib/email.ts` |
+| **Message Batches** | `/api/batch/*` — daily AI builder-briefing generation at 50% cost | `app/api/batch/` + `lib/batch.ts` |
 | **Eval harness** | 18 personas × 6-criterion judge, supports `--variant=A | B | both` | `scripts/evals/` |
 | **9 Skills** | Workflows the customer's Claude Max runs to maintain the bot | `skills/` |
 | **5 Routines** | Scheduled cron jobs on the customer's Anthropic account | `routines/` |
-| **Install wizard** | Customer-facing 8-step setup | `app/install-wizard/` |
-| **Adjacent verticals** | Gift-pyramid capital-campaign planner (demo of vertical reuse) | `app/gift-pyramid/` |
+| **Install wizard** | Customer-facing 8-step setup at `/install-wizard` | `app/install-wizard/` |
 
 ## Quick start (dev)
 
@@ -149,7 +147,7 @@ The five scheduled routines + nine skills compose into a closed loop:
 
 | Status | What |
 |---|---|
-| ✅ Live | Hub, state pages, qualify form, concierge, lead pipeline, eval harness, 9 skills, 5 routines, A/B infrastructure, brand scanner, install wizard scaffold |
+| ✅ Live | Chatbot runtime, lead pipeline, eval harness, 9 skills, 5 routines, A/B variant infrastructure, brand scanner, webhook tester, install wizard |
 | 🔄 In progress | Polish on wizard Steps 4/7/8, Replit template repo, single-file Claude.ai artifact extraction |
 | 📋 Future | Per-tenant deployment of the bot (current model is fork-and-deploy per customer) |
 

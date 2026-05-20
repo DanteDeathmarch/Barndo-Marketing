@@ -1,366 +1,244 @@
-# BarndoBuilt — Project Context
+---
+name: BarndoBuilt
+description: Customer-owned conversion-chatbot template repo. Bot runtime + 9 Skills + 5 routines + 18-persona eval suite + install wizard. Each customer forks → owns the deployment.
+---
 
-A lead-generation business that captures rural landowners in **Texas, Tennessee,
-Oklahoma, Louisiana** who want to build custom barndominiums, scores them, and
-sells qualified leads to Complete Barndo Solutions (CBS) — and, later, other
-builders. The website is the front door. An autonomous "CEO" routine runs the
-business daily.
+# Project context
 
-> **Branding note.** BarndoBuilt is our own neutral brand. We do **not** have a
-> signed agreement with CBS yet — never present the site as their official
-> property. Once an agreement is signed, branding could change.
+This repo is a **template** for a customer-owned conversion-qualifying
+chatbot. A customer walks through the install wizard, ends up with their
+own deployment on their own stack (their Vercel, their Anthropic API key,
+their data), and maintains it via their Claude Max + a bundle of skills
+and scheduled routines.
+
+We do not host customer bots. We do not store customer leads. We do not
+proxy customer API calls. Each install is independent and owned by the
+customer forever.
+
+The first install target is Groundwork
+(`https://groundwork-draft.vercel.app`) — a barndominium-vertical
+customer who already has a public marketing site of their own. The bot
+embeds onto their existing site as a `<script>` tag widget.
 
 ---
 
-## Tech stack
-
-- **Next.js 16** (App Router) + **React 19** + **TypeScript** + **Tailwind v4**
-- Deployed to **Vercel** (target subdomain: `barndobuilt.vercel.app`)
-- **Notion** as the lead datastore (CEO routine reads it via MCP)
-- **Resend** for instant lead-alert emails
-- **Anthropic SDK** for the AI concierge and Message Batches lead assessment
-- A/B variant cookie via `proxy.ts` (Next 16's renamed middleware)
-
----
-
-## Repository layout
+## What's in the repo
 
 ```
 app/
-  layout.tsx               Shell + mounts ConciergeWidget
-  page.tsx                 Hub (A/B headline variants A and B)
-  [state]/page.tsx         /texas /tennessee /oklahoma /louisiana
-  qualify/page.tsx         Multi-step paginated form
-  thank-you/page.tsx       Post-submit
-  how-it-works/page.tsx
-  privacy/, terms/
+  page.tsx                 Template landing page (links to /install-wizard + GitHub)
+  install-wizard/page.tsx  Customer-facing 8-step onboarding
   api/
-    lead/route.ts          POST: score + write Notion + Resend alert
-    chat/route.ts          POST: streaming Claude concierge
+    chat/route.ts          Streaming Claude concierge (Sonnet 4.6, prompt-cached, A/B aware)
+    lead/route.ts          Score + tier + (optional) Notion write + (optional) Resend alert
     batch/assess/route.ts  POST: pull "New" leads, submit Message Batch
-    batch/collect/route.ts POST: write briefings back to Notion when batch ends
+    batch/collect/route.ts POST: write briefings back when batch ends
+    wizard/scan-brand/     Server-side site scrape for wizard Step 3
+    wizard/test-webhook/   Webhook ping with sample payload for Step 5
 components/
-  Header, Footer, CTAButton
-  ConciergeWidget          Sitewide chatbot
-  QualifyWizard            5-step form, localStorage progress
+  ConciergeWidget.tsx      The actual chat widget; what customers embed
 lib/
-  states.ts                TX/TN/OK/LA static data
+  concierge.ts             System prompt + KB; A/B variants (A=prod, B=candidate)
   scoring.ts               Server-side lead scoring (single source of truth)
-  form-options.ts          Shared form choice values
-  notion.ts                writeLeadToNotion, readLeadsByStatus, update helpers
+  notion.ts                Notion read/write helpers
   email.ts                 Resend instant-alert
-  concierge.ts             Concierge system prompt + knowledge base
   batch.ts                 Anthropic Message Batches integration
+  wizard-steps.ts          Step definitions + state shape for the install wizard
+  lessons-learned.md       The bot's institutional memory (seed file)
 proxy.ts                   Sets the bb_variant A/B cookie
+skills/                    9 maintenance workflows the customer's Claude Max runs
+routines/                  5 scheduled-routine JSON templates (RemoteTrigger API)
+scripts/evals/             18-persona × 6-criterion eval harness (npm run evals)
 ```
-
----
 
 ## Environment variables
 
-Required for the relevant feature; see `.env.example` for the canonical list.
+See `.env.example`. The minimum to run the wizard is none — every dependent
+feature stays gracefully off until its key is provided.
 
 | Var | Used by | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | concierge + batch | Claude API |
-| `NOTION_TOKEN` | lead pipeline | Notion integration token |
-| `NOTION_LEADS_DB_ID` | lead pipeline | The Leads database ID |
-| `RESEND_API_KEY` | instant alerts | Transactional email |
-| `LEAD_ALERT_FROM` / `LEAD_ALERT_TO` | instant alerts | Sender / owner inbox |
-| `BATCH_SECRET` | batch routes | Required — routes 503 until set |
+| `ANTHROPIC_API_KEY` | `/api/chat`, `/api/batch`, evals | Claude API |
+| `NOTION_TOKEN` + `NOTION_LEADS_DB_ID` | `/api/lead` | Lead persistence (optional — leads also fire the customer's webhook) |
+| `RESEND_API_KEY` + `LEAD_ALERT_FROM/TO` | `/api/lead` | Instant lead-alert emails |
+| `BATCH_SECRET` | `/api/batch/*` | Protects the cost-bearing batch endpoints (returns 503 until set) |
 
-`.env.local` is gitignored; `.env.example` is committed.
+`.env.local` is gitignored. `.env.example` is committed.
 
 ---
 
-## Lead pipeline
+## Architecture: customer owns everything
 
 ```
-form / concierge → /api/lead → score + tier → Notion (Status=New) → Resend alert
-                                                  ↓
-              CEO routine (daily) reads "New" → status updates, emails, etc.
-              /api/batch/assess pulls "New" → submits Message Batch (50% cost)
-              /api/batch/collect writes briefing → Notion (Status=Assessed)
+                ┌──────────────────────────────────────────┐
+                │ CUSTOMER OWNS EVERYTHING                  │
+                │ Their Claude Max, API key, Vercel,        │
+                │ Replit, GitHub, data                       │
+                └──────────────────────────────────────────┘
+                       │
+                       │ fork template (this repo)
+                       ▼
+        ┌──────────────────────────────────────────┐
+        │ THEIR DEPLOYED BOT (their Vercel)         │
+        │ - widget (chat UI, A/B variant cookie)    │
+        │ - /api/chat (Sonnet 4.6, prompt-cached)   │
+        │ - /api/lead (score → customer webhook)    │
+        └──────────────────────────────────────────┘
+                       │
+                       ├─→ skills/ (workflows their Claude Max runs)
+                       ├─→ routines/ (scheduled crons on their account)
+                       ├─→ scripts/evals/ (their regression test, grows over time)
+                       └─→ lib/lessons-learned.md (their bot's institutional memory)
+                       
+                       │ refinement loop:
+                       │
+        real conversation → daily-improvement → mining →
+        new persona → fix → live-fire-test passes →
+        ab-test-prompt verifies on real traffic →
+        promoted → smarter bot → back to top
 ```
-
-**Scoring rubric** (mirrored in `lib/scoring.ts` and `lib/batch.ts` system prompt):
-
-- Owns land outright: +30 · Land financed: +20
-- Timeline ≤12mo: +25 · 18mo+ / exploring: −20
-- Budget $150k+: +20
-- TX or TN: +15
-- 5+ acres: +10
-- "Knows what they want, needs a builder": +15
-
-Tiers: A ≥85 ($300–500/lead), B 50–84 ($150–250/lead), Nurture <50.
 
 ---
 
-## Notion "Leads" database
+## The 9 Skills
 
-Properties used by the code (create these exactly):
+Files in `skills/<name>/SKILL.md`. Each has paste-ready prompt templates
+the customer's Claude Max runs to maintain the bot.
+
+| Skill | Purpose | When it runs |
+|---|---|---|
+| `update-kb` | Edit `lib/knowledge.md` without breaking structure | On demand |
+| `refine-tone` | Rewrite the bot's voice (never touches KB or phase arc) | On demand |
+| `add-qualifying-rule` | Keep `scoring.ts` and the system-prompt rubric in sync | On demand |
+| `ab-test-prompt` | Test a prompt change as variant B vs production A | On demand + weekly routine when active |
+| `mine-transcripts-to-personas` | Turn real failed conversations into durable eval personas | On demand + auto-invoked daily for clusters of 3+ |
+| `self-audit` | Health card: webhook, logging, anomalies, reporting | On demand + daily routine |
+| `lessons-learned` | Diagnose failures, propose fixes, append to lessons file | On demand + daily routine |
+| `research-niche` | Research the customer's vertical, propose KB additions | On demand + weekly routine |
+| `live-fire-test` | Run the eval suite with `--variant=A | B | both` | On demand + monthly routine |
+
+See `skills/README.md`.
+
+## The 5 scheduled Routines
+
+Provisioned on the customer's Anthropic account via the RemoteTrigger API
+at install. None auto-commit anything except the monthly eval report.
+All email proposals to the owner; the owner approves via the matching
+Skill template.
+
+| Routine | Cron | Skill it runs |
+|---|---|---|
+| `daily-audit.json` | Daily 12 UTC | `self-audit` |
+| `daily-improvement.json` | Daily 13 UTC | `lessons-learned` + `mine-transcripts-to-personas` (clusters of 3+) |
+| `weekly-research.json` | Mon 14 UTC | `research-niche` |
+| `weekly-ab-evaluator.json` | Mon 16 UTC | `ab-test-prompt` Phase 3 — skips if B === A |
+| `monthly-eval.json` | 1st 15 UTC | `live-fire-test` (both variants) |
+
+Cost on the customer's Anthropic bill: roughly **$18–59/month** for all
+five. See `routines/README.md`.
+
+---
+
+## A/B variant infrastructure
+
+- `lib/concierge.ts` exports `CONCIERGE_SYSTEM_A` (production) and
+  `CONCIERGE_SYSTEM_B` (experimental candidate). B = A by default.
+- `proxy.ts` sets `bb_variant` cookie 50/50 on first visit.
+- `/api/chat` reads the cookie, calls `getConciergeSystem(variant)`.
+- Lead rows carry the variant (in Source field) for conversion-by-variant.
+- `npm run evals -- --variant=both` runs both prompts side-by-side and
+  outputs a winner recommendation.
+
+When the customer wants to test a change: they edit B's content (via the
+`refine-tone` or `add-qualifying-rule` skill template), deploy, wait for
+the `weekly-ab-evaluator` routine to recommend promote/revert/continue.
+
+---
+
+## Eval harness
+
+`scripts/evals/` — 18-persona × 6-criterion judge. Each run produces a
+dated markdown report in `evals-reports/` with aggregate scores, top
+failure modes, and proposed prompt edits.
+
+```
+npm run evals                       # variant A only
+npm run evals -- --variant=B        # variant B only
+npm run evals -- --variant=both     # side-by-side with winner recommendation
+```
+
+Cost: ~$1–4 per full run. Iterate on `lib/concierge.ts`, rerun, compare.
+See `scripts/evals/README.md` for the run-on-Replit path too.
+
+---
+
+## Notion Leads database (optional but recommended)
+
+Properties used when `NOTION_TOKEN` + `NOTION_LEADS_DB_ID` are set:
 
 | Property | Type |
 |---|---|
 | Name | title |
-| State | select (TX, TN, OK, LA, OTHER) |
-| Land Status | rich text |
-| Acreage | rich text |
-| Timeline | rich text |
-| Build Stage | rich text |
-| Budget | rich text |
+| State | select |
+| Land Status, Acreage, Timeline, Build Stage, Budget, Best Time, Source | rich text |
 | Score | number |
-| Tier | select (A, B, Nurture) |
-| Status | select (New, Assessing, Assessed, Nurture, Sold, ...) |
-| Source | rich text |
+| Tier, Status | select |
 | Phone | phone |
 | Email | email |
-| Best Time | rich text |
 | Submitted At | date |
 | Briefing | rich text *(filled by batch collect)* |
 
-The Notion integration must be shared with this database AND with the workspace
-that the CEO routine's MCP connector uses.
+The integration token needs read+write access to the database. Without
+Notion configured, the bot still works — leads just POST to the
+customer's webhook (set in wizard Step 5) and that's the durable record.
 
 ---
 
-## The autonomous CEO routine
-
-Cloud routine ID: **`trig_01Hzz7YTK4dBufyZqTz3xFFs`**
-(dashboard: https://claude.ai/code/routines/trig_01Hzz7YTK4dBufyZqTz3xFFs)
-
-- Runs daily at 9:00 AM America/Mexico_City (`0 15 * * *` UTC)
-- Connectors: Gmail (CBS outreach + owner digest), Notion (Leads + ops log), Google Drive
-- Maintains a **Decision Calendar** with default actions so the business never
-  stalls waiting on a human:
-  - Day 5: send initial CBS outreach (Email A)
-  - Day 7: evaluate Meta CPL, shift if > $40
-  - Day 10: send follow-up Email B if no CBS reply
-  - Day 14: auto-promote A/B headline winner
-  - Day 21: decide on county/metro SEO expansion
-  - Day 30: full review email to owner
-- Owner inbox: `handler@rebirthmultiverse.com`
-
-The full system prompt for the routine is stored on the routine itself (set via
-the RemoteTrigger API). To inspect or edit it, use the routines dashboard.
-
----
-
-## Multi-step qualification form
-
-5 paginated steps, easiest first, contact info last (`components/QualifyWizard.tsx`):
-
-1. State (TX/TN/OK/LA/Other) — fail-fast disqualifier
-2. Land ownership + acreage
-3. Timeline + build stage
-4. Budget
-5. Contact info (name, phone, email, best time)
-
-Partial progress saved to `localStorage` under `bb_qualify_progress`.
-"Other" state → soft exit screen, no submit.
-
----
-
-## AI concierge
-
-Sitewide chat widget (`components/ConciergeWidget.tsx`) backed by
-`POST /api/chat`. Model: `claude-sonnet-4-6` with prompt caching on the
-system prompt + knowledge base in `lib/concierge.ts`. Streams responses.
-Can act as a second lead-capture funnel (tagged `source: concierge`).
-
----
-
-## A/B testing
-
-`proxy.ts` sets a `bb_variant` cookie (A or B) 50/50 on first visit. The hub
-renders one of two headline variants (`HEADLINES` in `app/page.tsx`). Variant
-is written to each lead's Notion `Source` field so the CEO routine can compute
-conversion by variant.
-
----
-
-## Strategic context (for future sessions)
-
-- **Target segment:** rural landowners in TX/TN/OK/LA who already own acreage
-  and want to build within 6–18 months. Land = the #1 objection already removed.
-- **Channels (planned):** Meta Ads (primary), Google Search (high-intent),
-  cold email / direct mail to county property records (data play).
-- **Revenue model:** lead arbitrage — sell scored leads to CBS at $400/Tier A,
-  $200/Tier B. Goal: 50–100 qualified leads/month after ramp.
-- **Open business decisions** managed by the CEO routine's Decision Calendar.
-
----
-
-## Things deferred / not yet done
-
-- Vercel deployment (needs interactive `vercel login`)
-- Domain (running on a Vercel subdomain initially)
-- Programmatic SEO expansion (county / metro pages) — Day-21 decision
-- Segment-specific landing pages (`/veterans`, `/ag-families`) — Phase 2
-- Signed lead-purchase agreement with CBS — Day-5/10 outreach in motion
-
----
-
-## How to test locally
-
-```
-npm install
-npm run dev
-# Then POST a test lead:
-curl -X POST http://localhost:3000/api/lead -H "Content-Type: application/json" \
-  -d '{"state":"TX","landOwnership":"own-outright","acreage":"5-20",
-       "timeline":"0-6mo","buildStage":"need-builder","budget":"300-500k",
-       "firstName":"Test","lastName":"Lead","phone":"5125551234",
-       "email":"test@example.com","bestTime":"morning","source":"form"}'
-# → {"ok":true,"tier":"A"}
-```
-
-`npm run build` is the authoritative TypeScript + route check before pushing.
-
----
-
-## Original plan
-
-The full design rationale (site architecture, decision tradeoffs, build phases)
-lives at `C:\Users\greg\.claude\plans\great-site-architecture-batch-get-memoized-shannon.md`
-and is also copied into this repo as `docs/architecture-plan.md`.
-
----
-
-## 2026-05 Strategic pivot (read this)
-
-The business has been reframed from "BarndoBuilt is a consumer lead-gen brand
-selling leads to CBS" to **chatbot-as-a-product sold to builders**, plus layered
-lead-gen and adjacent niches:
-
-1. **Phase 1 — Product.** Perfect the concierge chatbot, package it as an
-   embed snippet, sell installs to builders. **First install target:
-   Groundwork** (`https://groundwork-draft.vercel.app`).
-2. **Phase 2 — Service.** Layer done-for-you lead-gen on top of the chatbot
-   for installed customers.
-3. **Phase 3 — Adjacent verticals.** Same chatbot, swapped knowledge base,
-   sold to other verticals. Confirmed candidate: a "marketing for builders"
-   B2B arm some customers operate, plus future verticals like nonprofit
-   fundraising tools (gift-pyramid planner, see \`/gift-pyramid\`).
-
-### Architecture decisions for the product phase
-
-- **Install format:** \`<script>\` tag the customer pastes (Intercom-style).
-- **Lead destination:** customer's system only (POST to a webhook they own).
-  We never store their captured leads.
-- **Knowledge base ownership:** we configure v1 from the wizard intake, and
-  they edit \`lib/knowledge.md\` directly in their forked repo using the
-  \`update-kb\` skill template in their Claude Max. No admin UI needed — git
-  is the audit trail.
-
-### Eval-driven prompt iteration
-
-The concierge is now under **conversation eval**. The harness in
-\`scripts/evals/\` simulates 15 visitor personas against the production system
-prompt, judges each conversation against a 6-criterion rubric, and writes a
-dated markdown report.
-
-Run: \`npm run evals\` (requires \`ANTHROPIC_API_KEY\` in \`.env.local\`).
-Cost per full run: ~$1–3. Iterate on \`lib/concierge.ts\`, rerun, compare
-aggregate scores. See \`scripts/evals/README.md\`.
-
-Future Claude sessions: when tuning the chatbot, default to running an eval
-before AND after the change, and include the score delta in the commit message.
-
----
-
-## Customer-owned product architecture
-
-This repo is now the **template** for a customer-owned chatbot install.
-When a customer goes through \`/install-wizard\`, they walk through 8 steps
-and end up with a copy of this codebase running on THEIR Vercel, using
-THEIR Anthropic API key, with THEIR data. We never store or proxy.
-
-Every install ships with three things that make the bot maintain itself:
-
-### 1. \`/skills/\` — workflows the customer's Claude Max runs
-Markdown SKILL.md files in \`/skills/<name>/\`. The customer pastes the
-template section from a SKILL into their Claude Max chat and gets a
-ready-to-commit edit back. See \`skills/README.md\`.
-
-| Skill | Purpose | Variant |
-|---|---|---|
-| \`update-kb\` | Edit \`lib/knowledge.md\` | On-demand only |
-| \`refine-tone\` | Rewrite tone rules in \`lib/concierge.ts\` (never touches arc or KB) | On-demand only |
-| \`add-qualifying-rule\` | Add lead scoring / disqualifying signals; keeps \`scoring.ts\` and the system-prompt rubric in sync | On-demand only |
-| \`ab-test-prompt\` | Safely test a prompt change as variant B against production variant A — three-phase workflow (setup → pre-flight eval → real-traffic decision) | On-demand + weekly routine |
-| \`mine-transcripts-to-personas\` | Turn real failed conversations into durable eval personas. Closes the production-failure → eval-persona → fix → verified loop | On-demand + daily (auto-invoked for clusters of 3+) |
-| \`self-audit\` | Daily health check: webhook, logging, anomalies, reporting | On-demand + daily routine |
-| \`lessons-learned\` | Diagnose bad transcripts, propose fixes, append to \`lib/lessons-learned.md\` | On-demand + daily routine |
-| \`research-niche\` | Research the customer's vertical, propose KB additions | On-demand + weekly routine |
-| \`live-fire-test\` | Run the eval suite from \`scripts/evals/\` against current prompt; supports \`--variant=A | B | both\` | On-demand + monthly routine |
-
-### 2. \`/routines/\` — scheduled cron jobs on the customer's Anthropic account
-JSON configs the wizard provisions via the RemoteTrigger API. They run on
-the customer's API key, email the owner with findings + proposed changes,
-and NEVER auto-commit anything except eval reports. See \`routines/README.md\`.
-
-| Routine | Cron | Skill it runs |
-|---|---|---|
-| \`daily-audit.json\` | Daily 12 UTC | self-audit |
-| \`daily-improvement.json\` | Daily 13 UTC | lessons-learned + mine-transcripts-to-personas (clusters of 3+) |
-| \`weekly-research.json\` | Mon 14 UTC | research-niche |
-| \`weekly-ab-evaluator.json\` | Mon 16 UTC | ab-test-prompt (Phase 3) — skips if B === A |
-| \`monthly-eval.json\` | 1st 15 UTC | live-fire-test (both variants) |
-
-Approval gate: every proposed change is emailed to the owner. They use
-the matching on-demand Skill template in their Claude Max to get a clean
-diff, then commit. The system never edits production prompts on its own.
-
-### 3. \`lib/lessons-learned.md\` — the bot's institutional memory
-Append-only log of every failure-and-fix. Newest at top. The
-\`lessons-learned\` skill enforces a standard entry format. After 3–6 months
-of use this becomes the most valuable doc in the repo — the answer to
-"why did we set it up that way?" lives here.
-
-### Install wizard
-
-\`/install-wizard\` is the customer-facing onboarding. 8 steps, all client-
-side, state persisted to localStorage. Step 1 includes the Claude Max
-bootstrap prompt. Step 3 calls \`/api/wizard/scan-brand\` to extract brand
-defaults from the customer's existing site. Step 7 reuses the eval harness.
-Step 8 outputs the install snippet + the on-demand Skill templates.
-
-The wizard's job is to set up the customer's deployment. Once they finish,
-they own it forever and we have no operational involvement unless they
-hire us for ongoing work.
-
-### The refinement loop (how the bot gets better over time)
-
-The Skills compose into a closed iteration cycle:
+## How the bot stays good over time
 
 ```
 real conversations
-    ↓
+   ↓
 daily-improvement routine (auto)
-    ↓ identifies failure clusters
+   ↓ identifies failure clusters
 mine-transcripts-to-personas (auto for clusters of 3+)
-    ↓ proposes new eval persona for the failing archetype
+   ↓ proposes new eval persona for the failing archetype
 owner adds persona + applies proposed fix in one commit
-    ↓
+   ↓
 live-fire-test (monthly cron, or on demand)
-    ↓ confirms fix passes new persona + no regression
+   ↓ confirms fix passes new persona + no regression
 ab-test-prompt (when the change is large enough)
-    ↓ tests B vs A on real traffic
+   ↓ tests B vs A on real traffic
 weekly-ab-evaluator routine recommends promote / revert
-    ↓
+   ↓
 back to top, with a more capable bot
 ```
 
 The eval suite ships at 18 generic personas and grows organically as
 the bot encounters real visitors. After ~90 days of mining, the persona
-library is grounded in actual production failures the bot has seen and
-fixes that have actually shipped — making it the bot's regression test.
+library is grounded in actual production failures and fixes that have
+actually shipped — making it the bot's regression test.
 
-### Adjacent verticals
+---
 
-The same architecture (deployed bot + bundled Skills + scheduled routines)
-applies to any vertical. \`/gift-pyramid\` is the first non-barndo demo —
-nonprofit capital-campaign planning. The Skills folder is vertical-
-agnostic; \`lib/knowledge.md\` and \`lib/concierge.ts\` are the only things
-that need to change per-vertical.
+## How to verify locally
+
+```bash
+npm install
+npm run build        # type check + route registration
+npm run lint         # zero errors expected
+```
+
+To test the eval harness end-to-end:
+
+```bash
+echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env.local
+npm run evals
+```
+
+To test the wizard:
+
+```bash
+npm run dev
+# open http://localhost:3000/install-wizard
+```
