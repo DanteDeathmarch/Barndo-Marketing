@@ -50,6 +50,21 @@ const STEPS: StepDef[] = [
   { id: "install", num: 8, title: "Install + ongoing playbook", blurb: "One script tag for your site, plus the five Claude Max templates you keep forever." },
 ];
 
+interface Persona {
+  id: string;
+  name: string;
+  description: string;
+  openingMessage: string;
+  expectedOutcome: "qualify-bridge" | "soft-exit" | "educate-then-bridge" | "gracefully-end";
+}
+
+interface EvalResult {
+  persona: Persona;
+  transcript: { role: "bot" | "persona"; content: string }[];
+  verdict: string;
+  score: number;
+}
+
 interface WizardState {
   currentStep: StepId;
   completed: StepId[];
@@ -69,6 +84,9 @@ interface WizardState {
   disqualifyingSignals: string;
   webhookUrl: string;
   vercelProjectName: string;
+  deployedUrl: string;
+  personas: Persona[];
+  evalResults: EvalResult[];
 }
 
 const INITIAL: WizardState = {
@@ -90,6 +108,9 @@ const INITIAL: WizardState = {
   disqualifyingSignals: "",
   webhookUrl: "",
   vercelProjectName: "",
+  deployedUrl: "",
+  personas: [],
+  evalResults: [],
 };
 
 const STORAGE_KEY = "conversion_bot_wizard_v1";
@@ -245,7 +266,7 @@ export default function InstallWizard() {
             {step.id === "knowledge" && <StepKnowledge state={state} update={update} onContinue={() => markComplete("knowledge", "qualifying")} />}
             {step.id === "qualifying" && <StepQualifying state={state} update={update} onContinue={() => markComplete("qualifying", "deploy")} />}
             {step.id === "deploy" && <StepDeploy state={state} update={update} onContinue={() => markComplete("deploy", "test")} />}
-            {step.id === "test" && <StepTest state={state} onContinue={() => markComplete("test", "install")} />}
+            {step.id === "test" && <StepTest state={state} update={update} onContinue={() => markComplete("test", "install")} />}
             {step.id === "install" && <StepInstall state={state} />}
           </div>
 
@@ -602,6 +623,11 @@ function StepQualifying({ state, update, onContinue }: { state: WizardState; upd
 
 function StepDeploy({ state, update, onContinue }: { state: WizardState; update: <K extends keyof WizardState>(k: K, v: WizardState[K]) => void; onContinue: () => void }) {
   const REPO = "https://github.com/DanteDeathmarch/Barndo-Marketing";
+  const [mcpState, setMcpState] = useState<"unknown" | "checking" | "available" | "unavailable">("unknown");
+  const [deployState, setDeployState] = useState<"idle" | "running" | "done" | "failed">("idle");
+  const [deployLog, setDeployLog] = useState<string[]>([]);
+  const [deployError, setDeployError] = useState("");
+
   const env = `ANTHROPIC_API_KEY=${state.anthropicKey ? "<your key from step 2>" : "(set in step 2)"}
 LEAD_WEBHOOK_URL=${state.webhookUrl || "(set in step 5)"}
 BRAND_COLOR=${state.brandColor}
@@ -610,15 +636,150 @@ TONE_WORDS=${state.toneWords}
 FORMALITY=${state.formality}
 BUSINESS_NAME=${state.vercelProjectName || "your-business"}`;
 
+  function logLine(line: string) {
+    setDeployLog((l) => [...l, line]);
+  }
+
+  async function checkMcp() {
+    setMcpState("checking");
+    try {
+      const probe = await askClaude(
+        `Do you currently have access to MCP tools for BOTH Vercel AND GitHub (the connectors that let you create Vercel projects and manage GitHub repos via tool calls)? Reply with exactly one word: YES or NO.`
+      );
+      const answer = probe.trim().toUpperCase();
+      setMcpState(answer.startsWith("YES") ? "available" : "unavailable");
+    } catch {
+      setMcpState("unavailable");
+    }
+  }
+
+  async function autoDeploy() {
+    if (!state.vercelProjectName.trim()) {
+      setDeployError("Set a Vercel project name first.");
+      return;
+    }
+    setDeployState("running");
+    setDeployLog([]);
+    setDeployError("");
+
+    try {
+      logLine("Asking your Claude to fork the template repo into your GitHub…");
+      const fork = await askClaude(
+        `Use your GitHub MCP tool to fork the repository ${REPO} into the authenticated user's account. If asked for a new name, use "${state.vercelProjectName}". When done, reply with exactly one line in this format:
+FORKED <full https URL of the new repo>
+If anything blocks you (no GitHub tool, auth issue, repo exists already), reply with one line: FAIL <reason>`
+      );
+      const forkMatch = fork.match(/FORKED\s+(\S+)/i);
+      if (!forkMatch) throw new Error(fork.replace(/^FAIL\s+/i, "").slice(0, 200));
+      const forkUrl = forkMatch[1];
+      logLine(`✓ Forked → ${forkUrl}`);
+
+      logLine("Asking your Claude to create the Vercel project and link it to the fork…");
+      const create = await askClaude(
+        `Use your Vercel MCP tool to create a new project. Name: ${state.vercelProjectName}. Source: the GitHub repository ${forkUrl}. Framework preset: Next.js. When done, reply with exactly one line:
+PROJECT <full vercel project URL like https://${state.vercelProjectName}.vercel.app>
+If blocked, reply: FAIL <reason>`
+      );
+      const projectMatch = create.match(/PROJECT\s+(\S+)/i);
+      if (!projectMatch) throw new Error(create.replace(/^FAIL\s+/i, "").slice(0, 200));
+      const projectUrl = projectMatch[1];
+      logLine(`✓ Project created → ${projectUrl}`);
+
+      logLine("Setting environment variables on the Vercel project…");
+      const setEnv = await askClaude(
+        `Use your Vercel MCP tool to set these environment variables on the project "${state.vercelProjectName}" (Production environment). Set each one individually:
+
+ANTHROPIC_API_KEY=${state.anthropicKey}
+LEAD_WEBHOOK_URL=${state.webhookUrl}
+BRAND_COLOR=${state.brandColor}
+BRAND_LOGO_URL=${state.logoUrl}
+TONE_WORDS=${state.toneWords}
+FORMALITY=${state.formality}
+BUSINESS_NAME=${state.vercelProjectName}
+
+When done, reply with exactly: ENV_SET
+If blocked, reply: FAIL <reason>`
+      );
+      if (!/ENV_SET/i.test(setEnv)) throw new Error(setEnv.replace(/^FAIL\s+/i, "").slice(0, 200));
+      logLine("✓ Env vars set");
+
+      logLine("Triggering a production deploy…");
+      const deploy = await askClaude(
+        `Use your Vercel MCP tool to trigger a production deploy of the project "${state.vercelProjectName}". Wait for the deploy to start. When started, reply with exactly:
+DEPLOY_STARTED <inspection URL>
+If blocked, reply: FAIL <reason>`
+      );
+      const deployMatch = deploy.match(/DEPLOY_STARTED\s+(\S+)/i);
+      logLine(deployMatch ? `✓ Deploy started → inspect at ${deployMatch[1]}` : "✓ Deploy triggered");
+
+      update("deployedUrl", projectUrl);
+      setDeployState("done");
+    } catch (err) {
+      setDeployState("failed");
+      setDeployError(err instanceof Error ? err.message : "deploy failed");
+    }
+  }
+
   const ready = state.vercelProjectName.trim().length > 2;
+
   return (
     <div className="space-y-5">
-      <div className="rounded-md bg-stone-100 p-4 text-sm">
-        <strong>Best path:</strong> if you have the Vercel and GitHub MCP connectors attached to your Claude, tell your Claude &quot;deploy this bot to my Vercel using these env vars&quot; and it&apos;ll orchestrate the whole thing. Otherwise use Path A below.
+      {/* MCP check + auto-deploy */}
+      <div className="rounded-md border-2 border-emerald-300 bg-emerald-50 p-4 space-y-3">
+        <p className="font-semibold text-emerald-900 text-sm">
+          ⚡ Auto-deploy (Vercel + GitHub MCP)
+        </p>
+        <p className="text-xs text-stone-700">
+          If you have Vercel and GitHub MCP connectors attached to this Claude
+          conversation, the wizard can orchestrate the entire fork + deploy
+          + env-var setup for you. Zero terminal commands.
+        </p>
+
+        {mcpState === "unknown" && (
+          <button type="button" onClick={checkMcp} className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800">
+            Check if my Claude has the connectors
+          </button>
+        )}
+        {mcpState === "checking" && <p className="text-xs text-stone-600">Checking your Claude&apos;s tool access…</p>}
+        {mcpState === "available" && (
+          <div className="space-y-2">
+            <p className="text-xs text-emerald-800 font-semibold">✓ Vercel + GitHub MCP detected.</p>
+            <input type="text" value={state.vercelProjectName} onChange={(e) => update("vercelProjectName", e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))} placeholder="Project name (lowercase, no spaces)" className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-mono" />
+            <button type="button" onClick={autoDeploy} disabled={!ready || deployState === "running"} className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">
+              {deployState === "running" ? "Deploying…" : "Auto-deploy to my Vercel"}
+            </button>
+          </div>
+        )}
+        {mcpState === "unavailable" && (
+          <p className="text-xs text-stone-600">
+            No Vercel/GitHub MCP detected. Use Path A below — takes ~3 extra clicks but works without connectors.
+            <button type="button" onClick={() => setMcpState("unknown")} className="ml-2 text-red-800 font-semibold hover:underline">
+              Recheck
+            </button>
+          </p>
+        )}
+
+        {deployLog.length > 0 && (
+          <div className="rounded-md bg-stone-900 text-stone-50 p-3 text-xs font-mono space-y-1 max-h-48 overflow-y-auto">
+            {deployLog.map((l, i) => <div key={i}>{l}</div>)}
+          </div>
+        )}
+        {deployState === "done" && state.deployedUrl && (
+          <div className="rounded-md bg-white border border-emerald-300 p-3 text-sm">
+            <strong className="text-emerald-800">✓ Deployed.</strong>{" "}
+            <a href={state.deployedUrl} target="_blank" rel="noopener noreferrer" className="text-red-800 font-semibold hover:underline">
+              {state.deployedUrl}
+            </a>
+          </div>
+        )}
+        {deployState === "failed" && (
+          <p className="text-xs text-red-800">⚠ Auto-deploy stopped: {deployError}. Use Path A below to finish manually.</p>
+        )}
       </div>
 
+      {/* Manual path always shown as fallback */}
       <div className="rounded-md border border-stone-200 p-4">
-        <p className="font-semibold text-sm mb-2">Path A — Fork to GitHub, import to Vercel</p>
+        <p className="font-semibold text-sm mb-2">Path A — Fork to GitHub, import to Vercel (manual)</p>
         <ol className="list-decimal list-inside text-sm text-stone-700 space-y-1.5">
           <li>Open <a href={REPO} target="_blank" rel="noopener noreferrer" className="text-red-800 font-semibold hover:underline">the template repo</a> → Fork</li>
           <li>Go to <a href="https://vercel.com/new" target="_blank" rel="noopener noreferrer" className="text-red-800 font-semibold hover:underline">vercel.com/new</a> → Import your fork</li>
@@ -627,10 +788,12 @@ BUSINESS_NAME=${state.vercelProjectName || "your-business"}`;
         </ol>
       </div>
 
-      <label className="text-sm block">
-        <span className="block font-semibold mb-1">Vercel project name</span>
-        <input type="text" value={state.vercelProjectName} onChange={(e) => update("vercelProjectName", e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))} placeholder="your-bot-name" className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-mono" />
-      </label>
+      {!state.deployedUrl && (
+        <label className="text-sm block">
+          <span className="block font-semibold mb-1">Vercel project name</span>
+          <input type="text" value={state.vercelProjectName} onChange={(e) => update("vercelProjectName", e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))} placeholder="your-bot-name" className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-mono" />
+        </label>
+      )}
 
       <div className="rounded-md border border-stone-200">
         <div className="flex items-center justify-between p-3 border-b border-stone-200">
@@ -644,74 +807,249 @@ BUSINESS_NAME=${state.vercelProjectName || "your-business"}`;
 
       {ready && (
         <button onClick={onContinue} className="rounded-md bg-red-800 px-5 py-2.5 text-sm font-semibold text-stone-50 hover:bg-red-900">
-          Deployed — continue to test
+          {state.deployedUrl ? "Continue to test →" : "Deployed manually — continue to test"}
         </button>
       )}
     </div>
   );
 }
 
-function StepTest({ state, onContinue }: { state: WizardState; onContinue: () => void }) {
-  const [running, setRunning] = useState(false);
-  const [transcript, setTranscript] = useState("");
-  const [error, setError] = useState("");
+function StepTest({ state, update, onContinue }: { state: WizardState; update: <K extends keyof WizardState>(k: K, v: WizardState[K]) => void; onContinue: () => void }) {
+  const [genState, setGenState] = useState<"idle" | "generating" | "done" | "error">("idle");
+  const [genError, setGenError] = useState("");
+  const [evalState, setEvalState] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [evalError, setEvalError] = useState("");
+  const [evalProgress, setEvalProgress] = useState({ done: 0, total: 0, current: "" });
 
-  async function runQuickEval() {
-    setRunning(true);
-    setError("");
-    setTranscript("");
+  async function generatePersonas() {
+    if (!state.qualifyingGoal.trim() || !state.qualifyingSignals.trim()) {
+      setGenError("Fill in Step 5 first (qualifying goal + signals).");
+      return;
+    }
+    setGenState("generating");
+    setGenError("");
     try {
-      const prompt = `You are running a quick live-fire test on a customer-qualifying chatbot.
+      const prompt = `Generate 8 visitor personas to stress-test a customer-qualifying chatbot. The bot's job: ${state.qualifyingGoal}. Qualifying signals (good lead): ${state.qualifyingSignals}. Disqualifying signals: ${state.disqualifyingSignals || "(none specified)"}.
 
-The bot's job: ${state.qualifyingGoal || "qualify visitors and bridge them to the next step"}
-Qualifying signals: ${state.qualifyingSignals}
-Disqualifying signals: ${state.disqualifyingSignals}
-Voice: ${state.toneWords}, formality: ${state.formality}
+Make the personas COVER the realistic distribution this bot will encounter:
+- 2 strong fits (different sub-archetypes — e.g. ready-buyer vs returning-customer)
+- 1 tire-kicker (curious, not ready, never commits)
+- 1 wrong-fit (matches a disqualifying signal)
+- 1 hostile/skeptic (rude but real intent underneath)
+- 1 terse/mobile (1-3 word answers, hard to draw out)
+- 1 overqualified (knows more than the bot; impatient with discovery)
+- 1 time-waster (asks endless hypotheticals, never moves toward decision)
 
-Simulate a brief 4-turn conversation between THIS bot (configured as above) and ONE persona of each of these archetypes:
+For EACH persona, return JSON. Output exactly ONE JSON array (no preamble, no markdown fences), each item shaped:
+{"id": "kebab-case-id", "name": "Human Readable Name", "description": "1-2 sentence backstory + key behaviors", "openingMessage": "what they say first to the bot", "expectedOutcome": "qualify-bridge" | "soft-exit" | "educate-then-bridge" | "gracefully-end"}
 
-1. IDEAL CUSTOMER — fits all qualifying signals, ready to convert
-2. EDGE CASE — partial fit, ambiguous
-3. WRONG-FIT — fits a disqualifying signal
+Keep descriptions short. Output ONLY the JSON array.`;
 
-For each, format like:
-### [Persona name]
-**Visitor:** opening message
-**Bot:** response (1-3 sentences max)
-**Visitor:** reply
-**Bot:** response
-
-Then end with a one-paragraph verdict: did the bot handle this persona well? What would you change in the system prompt?
-
-Keep total output under 600 words. Be concrete and useful.`;
-
-      const out = await askClaude(prompt);
-      setTranscript(out);
+      const raw = await askClaude(prompt);
+      const arrMatch = raw.match(/\[[\s\S]*\]/);
+      if (!arrMatch) throw new Error("Claude didn't return a JSON array.");
+      const personas = JSON.parse(arrMatch[0]) as Persona[];
+      if (!Array.isArray(personas) || personas.length === 0) throw new Error("Empty persona list.");
+      update("personas", personas);
+      setGenState("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "test failed");
-    } finally {
-      setRunning(false);
+      setGenState("error");
+      setGenError(err instanceof Error ? err.message : "generation failed");
     }
   }
+
+  function buildSystemPrompt(): string {
+    return `You are the conversion concierge for ${state.vercelProjectName || "this business"}. You behave like a knowledgeable, helpful guide — warm and direct, never pushy.
+
+Voice: ${state.toneWords}. Formality: ${state.formality}.
+
+Your job: ${state.qualifyingGoal}.
+
+Qualifying signals (a good lead looks like): ${state.qualifyingSignals}.
+Disqualifying signals (do not push these visitors to convert): ${state.disqualifyingSignals || "(none)"}.
+
+Conversation rules:
+- Keep replies 1-3 short sentences. No long paragraphs.
+- End almost every turn with ONE focused question. Never a menu.
+- Reflect the visitor's specific words back so they feel heard.
+- Never invent prices, names, or guarantees. Use ranges; say a [role] confirms after [event].
+- Follow a 4-phase arc: open (one curious question) → discovery (one thread per turn) → vision statement (synthesize their situation back) → bridge (point them to the next step).
+
+Knowledge base:
+${state.knowledgeMarkdown || state.knowledgeRaw || "(no knowledge configured yet)"}`;
+  }
+
+  async function runFullEval() {
+    if (state.personas.length === 0) {
+      setEvalError("Generate personas first.");
+      return;
+    }
+    setEvalState("running");
+    setEvalError("");
+    setEvalProgress({ done: 0, total: state.personas.length, current: "" });
+    update("evalResults", []);
+
+    const sys = buildSystemPrompt();
+    const results: EvalResult[] = [];
+
+    for (let i = 0; i < state.personas.length; i++) {
+      const p = state.personas[i];
+      setEvalProgress({ done: i, total: state.personas.length, current: p.name });
+
+      try {
+        const prompt = `You are evaluating a chatbot.
+
+BOT SYSTEM PROMPT:
+<<<
+${sys}
+>>>
+
+PERSONA:
+- Name: ${p.name}
+- Description: ${p.description}
+- Opening message: "${p.openingMessage}"
+- Expected outcome: ${p.expectedOutcome}
+
+Task: simulate a 5-turn conversation between this bot and this persona. The persona speaks first with the opening message. Stay strictly in character on both sides. The bot follows its system prompt. The persona behaves per their description.
+
+Then score the bot on this rubric, 1-5 each (5 = excellent):
+- brevity (bot turns are 1-3 sentences)
+- one_question (each turn ends with at most one focused question)
+- listens (bot reflects visitor's words back)
+- phase_arc (open → discovery → vision → bridge, paced for this persona)
+- honesty (no invented prices/names/guarantees)
+- outcome (handled this persona's expected outcome correctly)
+
+Return STRICT JSON, no preamble, no markdown fences, shape:
+{"transcript":[{"role":"persona","content":"..."},{"role":"bot","content":"..."}, ...], "scores":{"brevity":N,"one_question":N,"listens":N,"phase_arc":N,"honesty":N,"outcome":N}, "overall":N, "verdict":"one-paragraph assessment + ONE suggested system-prompt edit if any"}`;
+
+        const raw = await askClaude(prompt);
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) throw new Error("no json");
+        const parsed = JSON.parse(jsonMatch[0]);
+        results.push({
+          persona: p,
+          transcript: parsed.transcript ?? [],
+          verdict: parsed.verdict ?? "(no verdict)",
+          score: parsed.overall ?? 0,
+        });
+      } catch {
+        results.push({ persona: p, transcript: [], verdict: "Eval call failed; skipped.", score: 0 });
+      }
+    }
+
+    setEvalProgress({ done: state.personas.length, total: state.personas.length, current: "" });
+    update("evalResults", results);
+    setEvalState("done");
+  }
+
+  function downloadReport() {
+    const lines: string[] = [];
+    lines.push(`# Live-Fire Eval Report`);
+    lines.push(``);
+    lines.push(`Generated by the install wizard against your current configuration. ${state.personas.length} personas tested.`);
+    lines.push(``);
+    const overall = state.evalResults.length > 0
+      ? (state.evalResults.reduce((s, r) => s + r.score, 0) / state.evalResults.length).toFixed(2)
+      : "0.00";
+    lines.push(`**Overall: ${overall}/5**`);
+    lines.push(``);
+    for (const r of state.evalResults) {
+      lines.push(`## ${r.persona.name} — ${r.score}/5`);
+      lines.push(``);
+      lines.push(`_${r.persona.description}_`);
+      lines.push(``);
+      lines.push(`**Expected:** ${r.persona.expectedOutcome}`);
+      lines.push(``);
+      lines.push(`**Verdict:** ${r.verdict}`);
+      lines.push(``);
+      lines.push(`<details><summary>Transcript</summary>`);
+      lines.push(``);
+      for (const t of r.transcript) {
+        lines.push(`**${t.role === "bot" ? "Bot" : "Visitor"}:** ${t.content}`);
+        lines.push(``);
+      }
+      lines.push(`</details>`);
+      lines.push(``);
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `eval-report-${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const overall = state.evalResults.length > 0
+    ? state.evalResults.reduce((s, r) => s + r.score, 0) / state.evalResults.length
+    : 0;
 
   return (
     <div className="space-y-5">
       <p className="text-sm text-stone-700">
-        Your Claude role-plays three persona archetypes (ideal, edge case, wrong-fit) against your bot&apos;s current config. Catches obvious problems before any real visitor sees them.
-      </p>
-      <p className="text-xs text-stone-500">
-        For the full 18-persona regression suite, run <code>npm run evals</code> from your forked repo after Step 6.
+        Your Claude generates 8 visitor personas tailored to your qualifying criteria, then runs each against your configured bot and scores the conversations. Full report downloadable as markdown.
       </p>
 
-      <button onClick={runQuickEval} disabled={running} className="rounded-md bg-red-800 px-5 py-2.5 text-sm font-semibold text-stone-50 hover:bg-red-900 disabled:opacity-50">
-        {running ? "Running…" : "Run quick test"}
-      </button>
+      {/* Phase 1: generate personas */}
+      <div className="rounded-md border border-stone-200 p-4 space-y-3">
+        <p className="font-semibold text-sm">1. Generate personas for your vertical</p>
+        <button type="button" onClick={generatePersonas} disabled={genState === "generating"} className="rounded-md bg-red-800 px-4 py-2 text-sm font-semibold text-stone-50 hover:bg-red-900 disabled:opacity-50">
+          {genState === "generating" ? "Generating…" : state.personas.length > 0 ? "Regenerate personas" : "Generate personas"}
+        </button>
+        {genState === "error" && <p className="text-xs text-red-800">⚠ {genError}</p>}
+        {state.personas.length > 0 && (
+          <ul className="text-xs space-y-1">
+            {state.personas.map((p) => (
+              <li key={p.id} className="flex items-baseline gap-2">
+                <code className="text-stone-500">{p.id}</code>
+                <span className="font-semibold">{p.name}</span>
+                <span className="text-stone-600">— {p.description.slice(0, 100)}{p.description.length > 100 ? "…" : ""}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
-      {error && <p className="text-xs text-red-800">⚠ {error}</p>}
+      {/* Phase 2: run full eval */}
+      {state.personas.length > 0 && (
+        <div className="rounded-md border border-stone-200 p-4 space-y-3">
+          <p className="font-semibold text-sm">2. Run the eval ({state.personas.length} personas × bot × judge)</p>
+          <button type="button" onClick={runFullEval} disabled={evalState === "running"} className="rounded-md bg-red-800 px-4 py-2 text-sm font-semibold text-stone-50 hover:bg-red-900 disabled:opacity-50">
+            {evalState === "running" ? `Testing ${evalProgress.current}… (${evalProgress.done}/${evalProgress.total})` : state.evalResults.length > 0 ? "Re-run eval" : "Run full eval"}
+          </button>
+          {evalState === "error" && <p className="text-xs text-red-800">⚠ {evalError}</p>}
+          {evalState === "running" && (
+            <div className="w-full bg-stone-200 rounded-full h-2">
+              <div className="bg-red-800 h-2 rounded-full transition-all" style={{ width: `${(evalProgress.done / evalProgress.total) * 100}%` }} />
+            </div>
+          )}
+        </div>
+      )}
 
-      {transcript && (
-        <div className="rounded-md border border-stone-200 p-4 text-sm whitespace-pre-wrap font-mono text-xs max-h-[400px] overflow-y-auto">
-          {transcript}
+      {/* Results */}
+      {state.evalResults.length > 0 && (
+        <div className="rounded-md border-2 border-emerald-300 bg-emerald-50 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="font-semibold text-sm">
+              Overall: <span className="text-xl">{overall.toFixed(2)}/5</span>
+              {overall >= 4.2 ? <span className="ml-2 text-emerald-800">✓ ship it</span> : <span className="ml-2 text-amber-800">⚠ refine before going live</span>}
+            </p>
+            <button type="button" onClick={downloadReport} className="text-xs font-semibold text-red-800 hover:underline">
+              Download .md report
+            </button>
+          </div>
+          <ul className="text-xs space-y-1">
+            {state.evalResults.map((r) => (
+              <li key={r.persona.id} className="flex items-baseline gap-2">
+                <span className={"w-8 text-right font-mono " + (r.score >= 4 ? "text-emerald-700" : r.score >= 3 ? "text-amber-700" : "text-red-800")}>
+                  {r.score}/5
+                </span>
+                <span className="font-semibold">{r.persona.name}</span>
+                <span className="text-stone-600">— {r.verdict.slice(0, 120)}{r.verdict.length > 120 ? "…" : ""}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
